@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react";
-import { afterEach, beforeEach, describe, it, expect } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import {
   cleanup,
   fireEvent,
@@ -9,11 +9,97 @@ import {
   within,
 } from "@testing-library/react";
 import { App } from "./main";
+import { seed, pack } from "./simulator";
 beforeEach(() => {
   sessionStorage.clear();
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+  window.history.replaceState({}, "", "/");
+});
 describe("Manager interactions", () => {
+  it("keeps the reference activity table bounded and resets pagination when filters change", () => {
+    render(<App />);
+    const activity = within(
+      screen.getByRole("region", { name: "Subscriber activity" }),
+    );
+    expect(activity.getAllByRole("row")).toHaveLength(6);
+    expect(activity.getByText("Alex Bennett")).toBeTruthy();
+    fireEvent.click(
+      activity.getByRole("button", { name: "Next activity page" }),
+    );
+    expect(activity.queryByText("Alex Bennett")).toBeNull();
+    expect(activity.getByText(/Page 2 of/)).toBeTruthy();
+    fireEvent.change(
+      activity.getByRole("combobox", { name: "Filter subscriber activity" }),
+      { target: { value: "attention" } },
+    );
+    expect(activity.getAllByRole("row")).toHaveLength(4);
+    expect(activity.getByText("Jordan Avery")).toBeTruthy();
+    expect(activity.getByText("Page 1 of 1")).toBeTruthy();
+    fireEvent.change(
+      activity.getByRole("combobox", { name: "Subscriber activity period" }),
+      { target: { value: "hour" } },
+    );
+    expect(activity.getByText("No sessions match these filters")).toBeTruthy();
+    expect(
+      (
+        activity.getByRole("button", {
+          name: "Next activity page",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+  });
+  it("links a dashboard incident to its diagnostic recovery and reflects the result on the overview", () => {
+    render(<App />);
+    const incidents = within(screen.getByRole("region", { name: /Incidents/ }));
+    fireEvent.click(
+      incidents.getByRole("button", { name: /Circuit VLAN mismatch/ }),
+    );
+    expect(screen.getByText("The handoff VLAN does not match")).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: /Review VLAN correction/ }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Apply demo change" }));
+    fireEvent.click(screen.getByRole("button", { name: "Overview" }));
+    expect(
+      screen.getByRole("region", { name: "Incidents (2 open)" }),
+    ).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Gateways (2)" })).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open gateway-02 operations" }),
+    );
+    expect(screen.getByRole("heading", { name: "Operations" })).toBeTruthy();
+  });
+  it("uses the same redesigned overview when the PHP adapter supplies the workspace", async () => {
+    const workspace = seed();
+    window.history.replaceState({}, "", "/?backend=php");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue({
+        ok: true,
+        json: async () => ({ csrf: "test-csrf", workspace: pack(workspace) }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    await screen.findByRole("region", { name: "Gateways (2)" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/demo/api/v1/session",
+      expect.objectContaining({ credentials: "same-origin" }),
+    );
+    expect(
+      screen.getByRole("region", { name: "Subscriber activity" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("navigation", { name: "Workspace navigation" }),
+    ).toBeTruthy();
+    expect(
+      screen
+        .getByRole("button", { name: "Overview" })
+        .getAttribute("aria-current"),
+    ).toBe("page");
+  });
   it("reviews and creates a custom service profile", () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: "Service profiles" }));

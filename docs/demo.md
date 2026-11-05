@@ -30,9 +30,9 @@ Direct/static fixtures use reserved benchmark addresses within **198.18.0.0/15**
 
 Deterministic subscriber/mapping fixtures are generated locally; persistence and the PHP API transfer compact schema-v2 deltas rather than 12,000 full records. Stored v1 browser workspaces reset to the new fixtures on this demo upgrade; production data migrations are not involved. Edits, new subscribers, failover, and mapping closure survive compact round trips. The server-side subscriber endpoint uses the same search/mode/status filtering and returns at most 50 rows per request.
 
-The hosted version uses this browser simulator adapter and no production services. It is intentionally owner-private until sharing is explicitly changed.
+The live hosted version uses this browser simulator adapter and no production services. Its owner-selected host is now cPanel/WHM at **https://demo.liquidnat.com/**, document root `/home/liquidnat/public_html/demo.liquidnat.com/` on `master.mywebsitepanel.com`. GitHub Actions deploys only demo-related changes on main. See [deployment.md](deployment.md) for the restricted SSH key, release verification and rollback.
 
-**Published private demo:** https://liquidnat-manager-demo.charlesbradbeer.chatgpt.site
+**Historical private Sites preview (not the ongoing deployment target):** https://liquidnat-manager-demo.charlesbradbeer.chatgpt.site
 
 Deployment confirmed successful on 2026-11-05. Site project `appgprj_6aec69f7578c8191a5a878133e6ba86a`; deployment `appgdep_6aec794309c48191ae1ed6040dc09109`; saved version `appgprj_6aec69f7578c8191a5a878133e6ba86a~appgver_814413767be88191ad7ef0428107f59f`. Published source commit in the separate Sites checkout: `91ba01d61d0e84d6cfd1609ddde1ff0bf041993b`. The application source is also merged/pushed to the main product repository at `2094705858d919f122cd526883da09505fa1f7bf`; publication checkout metadata is separate from product Git history.
 

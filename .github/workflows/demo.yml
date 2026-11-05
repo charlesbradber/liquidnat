@@ -1,7 +1,21 @@
 name: Manager demo and API
 on:
   push:
+    paths:
+      - 'management/**'
+      - 'tests/demo_api.py'
+      - 'tests/demo_deployment.py'
+      - 'deploy/demo/**'
+      - '.github/workflows/demo.yml'
+      - 'schemas/demo-api.md'
   pull_request:
+    paths:
+      - 'management/**'
+      - 'tests/demo_api.py'
+      - 'tests/demo_deployment.py'
+      - 'deploy/demo/**'
+      - '.github/workflows/demo.yml'
+      - 'schemas/demo-api.md'
 permissions:
   contents: read
 jobs:
@@ -22,3 +36,4 @@ jobs:
         working-directory: management/web
       - name: Verify HTTP adapter using the selected Node runtime
         run: LIQUIDNAT_NODE_BIN="$(command -v node)" python3 tests/demo_api.py
+      - run: python3 tests/demo_deployment.py

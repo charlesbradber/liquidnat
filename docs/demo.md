@@ -34,7 +34,7 @@ The hosted version uses this browser simulator adapter and no production service
 
 **Published private demo:** https://liquidnat-manager-demo.charlesbradbeer.chatgpt.site
 
-Deployment confirmed successful on 2026-11-05. Site project `appgprj_6aec69f7578c8191a5a878133e6ba86a`; deployment `appgdep_6aec702582d4819181e57f817e933bac`; saved version `appgprj_6aec69f7578c8191a5a878133e6ba86a~appgver_b329b96f67cc8191ab5c56583a853eb7`. Published source commit in the separate Sites checkout: `b57666f297b6536dc17f1a4b0ba692abb550b50c`. The application source is also merged/pushed to the main product repository at `a6023d0bccec74d213d1f24142fe6d782c22aa59`; publication checkout metadata is separate from product Git history.
+Deployment confirmed successful on 2026-11-05. Site project `appgprj_6aec69f7578c8191a5a878133e6ba86a`; deployment `appgdep_6aec794309c48191ae1ed6040dc09109`; saved version `appgprj_6aec69f7578c8191a5a878133e6ba86a~appgver_814413767be88191ad7ef0428107f59f`. Published source commit in the separate Sites checkout: `91ba01d61d0e84d6cfd1609ddde1ff0bf041993b`. The application source is also merged/pushed to the main product repository at `2094705858d919f122cd526883da09505fa1f7bf`; publication checkout metadata is separate from product Git history.
 
 ## Explore
 
@@ -84,8 +84,10 @@ Unit tests exercise all nine scenario transitions, isolation, validation, stale 
 
 Visual QA is outstanding: the browser-control host was unavailable during development. Responsive CSS and mobile navigation are implemented, but device rendering and a five-person fresh-user evaluation still need verification. Physical forwarding, NAT, PPPoE/IPoE, real RADIUS and HA remain separate platform milestones; simulated scenarios are not proof of those services.
 
-Verified locally for this increment: 13 passing model/DOM interaction tests; successful TypeScript/release build; passing PHP HTTP isolation/security suite; existing engine unit regression passing. Browser preview returned HTTP 200. Sites returned a successful private deployment; no browser visual result is claimed.
+Verified locally for this increment: 21 passing model/DOM interaction tests; successful TypeScript/release build; passing PHP HTTP isolation/security suite; existing engine unit regression passing. Browser preview returned HTTP 200. Sites returned a successful private deployment; no browser visual result is claimed.
 
 ## Git workflow
 
 Test each change on a feature branch, commit, merge with `--no-ff` into `main`, then push `main`. The tested engine foundation is already on main. The browser demo and PHP adapter are committed and merged as separate reviewable increments. Never rewrite remote history or merge unrelated unreviewed local files.
+
+Scaled-demo CI passed for product commit `2094705858d919f122cd526883da09505fa1f7bf`: [Manager demo/API](https://github.com/charlesbradber/liquidnat/actions/runs/42028965774) and [Gateway engine](https://github.com/charlesbradber/liquidnat/actions/runs/42028965966). Private publication of the scaled version was confirmed successful on 2026-11-05.

@@ -38,3 +38,11 @@ Choose an actual retained SHA from the release manifests; never interpolate an u
 For CI-key rotation, generate a new dedicated Ed25519 key on the admin host, append a restricted forced-command public-key entry for liquidnat, replace only `DEMO_DEPLOY_SSH_KEY` through stdin, verify a deployment, then remove the superseded dedicated public key. Keep production/root administrative keys separate. No key material belongs in documentation.
 
 Only the browser simulator is public. The PHP/SQLite/Node simulator API is not deployed, and no real gateway, RADIUS endpoint, SSH console or packet engine is exposed by the demo.
+
+## Verified installation — 2026-11-05
+
+Initial cPanel deployment was checked directly over HTTPS, including every HTML/JS/CSS hash, HTTP-to-HTTPS redirect and cache/security headers. An arbitrary `id` command through the dedicated CI key was rejected by the receiver. The original cPanel directives and AutoSSL directory remained present.
+
+The first automatic deployment completed successfully from source **5a6841fd97c5d48d0327a81f99225db824b59522**: [build, restricted SSH publish, and live HTTPS verification](https://github.com/charlesbradber/liquidnat/actions/runs/42030904129). The demo/API and Gateway workflows also passed for that commit. `/deployment.json` reported that exact SHA. The temporary private-key copy on the SSH server was removed after this successful CI run; the encrypted repository secret remains available for future deployments.
+
+A separate integration worktree at `/home/charlesbradbeer/projects/liquidnat-demo-integration` was used to merge concurrent marketing-site work. The original checkout's unrelated untracked landing-page files were preserved.

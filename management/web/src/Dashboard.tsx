@@ -496,8 +496,8 @@ export function Dashboard({
       </section>
       <div className="dashboard-guide">
         <span>
-          <strong>{incidents.length} services need attention</strong> ·
-          Manage subscriber services, network configuration and gateway operations.
+          <strong>{incidents.length} services need attention</strong> · Manage
+          subscriber services, network configuration and gateway operations.
         </span>
         <button className="text-link" onClick={onGuide}>
           Open quick actions <ArrowRight size={14} />

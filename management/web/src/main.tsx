@@ -1168,9 +1168,7 @@ export function App() {
               onOperations={() => go("operations")}
               onSubscribers={() => go("subscribers")}
               onDiagnostics={() => go("diagnostics")}
-              onGuide={() =>
-                setModal({ kind: "tour", title: "Quick actions" })
-              }
+              onGuide={() => setModal({ kind: "tour", title: "Quick actions" })}
             />
           )}
 
@@ -1316,7 +1314,7 @@ export function App() {
               <div className="modal-actions">
                 <button
                   className="button primary"
-                  disabled={state.profiles.length >= 32}
+                  disabled={state.profiles.length >= 300}
                   onClick={() => {
                     setPlanName("");
                     setPlanDown("2500");
@@ -1605,7 +1603,8 @@ export function App() {
                     />
                   </div>
                   <p className="muted">
-                    Admission capacity controls how many subscriber services can use the shared IPv4 pool.
+                    Admission capacity controls how many subscriber services can
+                    use the shared IPv4 pool.
                   </p>
                   <button
                     className="button secondary"
@@ -2395,11 +2394,17 @@ export function App() {
                     {
                       type: "create-profile",
                       name: planName,
+                      provider: createProvider,
                       down: Number(planDown),
                       up: Number(planUp),
                     },
                     "Review service profile",
                     [
+                      [
+                        "Network provider",
+                        state.providers.find((p) => p.id === createProvider)!
+                          .name,
+                      ],
                       ["Name", planName.trim()],
                       ["Download", `${planDown} Mb/s`],
                       ["Upload", `${planUp} Mb/s`],
@@ -2416,6 +2421,19 @@ export function App() {
                 }}
               >
                 <div className="form-grid">
+                  <label>
+                    Network provider
+                    <select
+                      value={createProvider}
+                      onChange={(e) => setCreateProvider(e.target.value)}
+                    >
+                      {state.providers.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <label>
                     Profile name
                     <input
@@ -2454,7 +2472,8 @@ export function App() {
                 </div>
                 <p className="modal-description">
                   Create a new policy to preserve existing assignments. Speeds
-                  support up to 100 Gb/s and apply to assigned subscriber services.
+                  support up to 100 Gb/s and apply to assigned subscriber
+                  services.
                 </p>
                 {formError && <p role="alert">{formError}</p>}
                 <div className="modal-actions">

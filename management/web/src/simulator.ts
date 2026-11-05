@@ -91,7 +91,13 @@ export type Workspace = {
   retention: number;
 };
 export type Action =
-  | { type: "create-profile"; name: string; down: number; up: number }
+  | {
+      type: "create-profile";
+      name: string;
+      down: number;
+      up: number;
+      provider?: string;
+    }
   | { type: "radius-save"; config: RadiusConfig }
   | { type: "network-save"; config: NetworkConfig }
   | {
@@ -225,9 +231,11 @@ export function querySubscribers(
   limit = 10,
   status = "all",
   mode = "all",
+  provider = "all",
 ) {
   const matches = s.subscribers.filter(
     (sub) =>
+      (provider === "all" || sub.provider === provider) &&
       matchesSubscriber(sub, query) &&
       (status === "all" ||
         (status === "issues"
@@ -678,6 +686,7 @@ export function apply(
     s.profiles = s.profiles.filter((item) => item.id !== p.id);
     event(s, "Profiles", "Service profile deleted", p.name, now);
   } else if (action.type === "create-profile") {
+    const provider = requireProvider(action.provider ?? s.providers[0].id);
     const name = action.name.trim();
     if (!/^[a-zA-Z0-9 .+'-]{2,48}$/.test(name))
       throw new DemoError(
@@ -693,15 +702,21 @@ export function apply(
         "VALIDATION",
         "Speeds must be whole numbers between 1 and 100,000 Mb/s.",
       );
-    if (s.profiles.length >= 32)
+    if (s.profiles.length >= 300)
       throw new DemoError(
         "CAPACITY",
-        "This workspace supports up to 32 service profiles.",
+        "This workspace supports up to 300 service profiles.",
       );
-    if (s.profiles.some((p) => p.name.toLowerCase() === name.toLowerCase()))
+    if (
+      s.profiles.some(
+        (p) =>
+          p.provider === provider &&
+          p.name.toLowerCase() === name.toLowerCase(),
+      )
+    )
       throw new DemoError("DUPLICATE", "That profile name is already in use.");
     const created = {
-      provider: s.providers[0].id,
+      provider,
       id: `profile-${uid()}`,
       name,
       down: action.down,
@@ -854,14 +869,20 @@ export function apply(
   } else if (action.type === "profile") {
     const sub = find(action.id),
       p = profile(action.profile);
+    const previousProvider = s.providers.find(
+      (provider) => provider.id === sub.provider,
+    )!.name;
     sub.provider = selectedProvider(action.profile, action.provider);
+    const nextProvider = s.providers.find(
+      (provider) => provider.id === sub.provider,
+    )!.name;
     sub.profile = p.id;
     complete(s, "package");
     event(
       s,
       "Policy",
       "Service profile applied",
-      `${sub.name} → ${p.name} (${p.down}/${p.up} Mb/s). CoA acknowledged; session retained.`,
+      `${sub.name} → ${p.name} (${p.down}/${p.up} Mb/s) · ${previousProvider} → ${nextProvider}. CoA acknowledged; session retained.`,
       now,
     );
   } else if (
@@ -1046,7 +1067,13 @@ export function parseAction(value: unknown): Action {
   if (type === "create-profile") {
     if (typeof a.down !== "number" || typeof a.up !== "number")
       throw new DemoError("VALIDATION", "Speeds must be numbers.");
-    return { type, name: text("name", 48), down: a.down, up: a.up };
+    return {
+      type,
+      name: text("name", 48),
+      down: a.down,
+      up: a.up,
+      ...(a.provider !== undefined ? { provider: text("provider") } : {}),
+    };
   }
   if (type === "radius-save") return { type, config: a.config as RadiusConfig };
   if (type === "network-save")

@@ -61,7 +61,7 @@ describe("Manager interactions", () => {
     fireEvent.click(
       screen.getByRole("button", { name: /Review VLAN correction/ }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Apply demo change" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply change" }));
     fireEvent.click(screen.getByRole("button", { name: "Overview" }));
     expect(
       screen.getByRole("region", { name: "Incidents (2 open)" }),
@@ -75,12 +75,10 @@ describe("Manager interactions", () => {
   it("uses the same redesigned overview when the PHP adapter supplies the workspace", async () => {
     const workspace = seed();
     window.history.replaceState({}, "", "/?backend=php");
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue({
-        ok: true,
-        json: async () => ({ csrf: "test-csrf", workspace: pack(workspace) }),
-      });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ csrf: "test-csrf", workspace: pack(workspace) }),
+    });
     vi.stubGlobal("fetch", fetchMock);
     render(<App />);
     await screen.findByRole("region", { name: "Gateways (2)" });
@@ -113,7 +111,7 @@ describe("Manager interactions", () => {
     expect(
       screen.getByText("Unchanged; assign the new profile separately"),
     ).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Apply demo change" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply change" }));
     expect(screen.getByRole("heading", { name: "Fibre 2500" })).toBeTruthy();
     expect(screen.getAllByText("0 assigned subscribers")).toHaveLength(1);
   });

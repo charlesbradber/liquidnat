@@ -35,6 +35,7 @@ try {
           Number(request.limit) || 10,
           String(request.status || "all"),
           String(request.mode || "all"),
+          String(request.provider || "all"),
         ),
       }),
     );

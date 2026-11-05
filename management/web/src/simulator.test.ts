@@ -92,7 +92,7 @@ describe("Isolated demo backend", () => {
     ).toThrow("profile name");
     const full = {
       ...s,
-      profiles: Array.from({ length: 32 }, (_, i) => ({
+      profiles: Array.from({ length: 300 }, (_, i) => ({
         ...s.profiles[0],
         id: `p${i}`,
         name: `Plan ${i}`,
@@ -105,7 +105,7 @@ describe("Isolated demo backend", () => {
         full.revision,
         now,
       ),
-    ).toThrow("32 service profiles");
+    ).toThrow("300 service profiles");
   });
   it("retains a reserved static address after authentication recovery and can bypass a blocked NAT admission", () => {
     let s = seed(now);

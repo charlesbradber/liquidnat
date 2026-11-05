@@ -91,3 +91,11 @@ Verified locally for this increment: 21 passing model/DOM interaction tests; suc
 Test each change on a feature branch, commit, merge with `--no-ff` into `main`, then push `main`. The tested engine foundation is already on main. The browser demo and PHP adapter are committed and merged as separate reviewable increments. Never rewrite remote history or merge unrelated unreviewed local files.
 
 Scaled-demo CI passed for product commit `2094705858d919f122cd526883da09505fa1f7bf`: [Manager demo/API](https://github.com/charlesbradber/liquidnat/actions/runs/42028965774) and [Gateway engine](https://github.com/charlesbradber/liquidnat/actions/runs/42028965966). Private publication of the scaled version was confirmed successful on 2026-11-05.
+
+### Multiple network providers
+
+Open **Network providers** to add or rename providers and see their subscriber/profile counts. In **Service profiles**, create a package and select its provider, download/upload speeds and monthly price. Review each change before applying it.
+
+When adding a subscriber, choose its provider first; only that provider's service profiles are offered. Providers without profiles cannot accept a new subscriber until you add a profile. In a subscriber's **Change profile** dialog, select another provider and one of its profiles to transfer the service. The subscriber list can be filtered by provider and shows provider membership; details and exports retain it.
+
+Profiles with assigned subscribers cannot be deleted or moved to another provider. Move those subscribers first. Empty providers can be deleted after removing their profiles; one provider must remain. Existing saved sessions migrate under ExampleNet and retain their subscriber changes. These are simulated configuration groups within a demo workspace.

@@ -54,7 +54,10 @@ export function diagnose(
     {
       title: "Forwarding readiness",
       detail: routeLookup(workspace.network || initialNetwork(), "1.1.1.1"),
-      failed: routeLookup(workspace.network || initialNetwork(), "1.1.1.1").startsWith("No installed"),
+      failed: routeLookup(
+        workspace.network || initialNetwork(),
+        "1.1.1.1",
+      ).startsWith("No installed"),
       code: "FORWARDING_READY",
     },
   ];

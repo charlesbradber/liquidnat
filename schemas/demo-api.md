@@ -28,3 +28,11 @@ Provider mutations: `save-provider {name,id?}` adds or renames a provider; `dele
 Subscriber `create` and `profile` mutations accept an optional `provider`; when omitted it is inferred from the selected profile for older callers. Explicit mismatches reject as `PROVIDER_MISMATCH`. Selecting a profile on another provider transfers the subscriber and its provider together. GET `/subscribers` accepts `provider=<id>` (default `all`) alongside the existing filters. Provider IDs are workspace configuration groupings, not security or tenant isolation boundaries. All actions remain simulations and use the same revision, validation, audit and replay rules.
 
 The existing `create-profile {name,down,up}` action also accepts an optional `provider` (defaults to the first provider for older callers), validates provider-scoped name uniqueness and shares the 300-profile workspace limit. The quick-create dialog includes provider selection.
+
+### PPPoE and DHCP connection types
+
+Network providers have a `connectionType` default (`pppoe` or `dhcp`). Set it in Network providers, Network, or RADIUS; changes go through review and apply, and existing subscribers retain their configured type. New subscribers inherit the selected provider's default and can override it. Subscriber details show the configured access type; **Change connection type** edits it independently of the service profile and IPv4 mode. Subscriber filters and exports retain the type.
+
+RADIUS views distinguish PPPoE username/PPP sessions from DHCP IPoE leases identified by MAC and circuit. Diagnostics reflect this identity. All access and accounting behaviour is simulated; the GUI does not run PPPoE, DHCP or RADIUS services.
+
+API actions `save-provider` and `create` accept optional `connectionType`. Omission preserves an existing provider's default (or uses PPPoE for a new provider), and subscriber creation inherits its provider's default. `{type:"connection",id,connectionType}` changes a subscriber's type. GET `/subscribers` accepts `connectionType=pppoe|dhcp|all`. Unsupported types reject. Older saved records migrate to PPPoE while retaining their existing data; provider transfers retain each subscriber's explicit connection type.

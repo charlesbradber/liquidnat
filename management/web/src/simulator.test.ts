@@ -270,7 +270,7 @@ describe("Isolated demo backend", () => {
       {
         type: "create",
         name: "Demo Test",
-        username: "new.test@example.net",
+        username: "new.test@liquidnet.net",
         profile: "home500",
       },
       s.revision,
@@ -302,7 +302,7 @@ describe("Isolated demo backend", () => {
     run({
       type: "create",
       name: "Example Subscriber",
-      username: "new.person@example.net",
+      username: "new.person@liquidnet.net",
       profile: "home500",
     });
     expect(s.subscribers[0].status).toBe("online");
@@ -327,13 +327,13 @@ describe("Isolated demo backend", () => {
     ).toBe(true);
     run({ type: "upgrade" });
     s = tick(s, now + 6001);
-    expect(s.version).toBe("0.2.1-demo");
+    expect(s.version).toBe("0.2.1");
     expect(s.backupAt).not.toBeNull();
     expect(lookup(s, "203.0.113.10", 40012, "TCP", now)).toHaveLength(1);
     run({ type: "mapping-viewed" });
     expect(s.completed).toHaveLength(9);
     run({ type: "rollback" });
-    expect(s.version).toBe("0.2.0-demo");
+    expect(s.version).toBe("0.2.0");
     expect(s.events.length).toBeGreaterThan(9);
   });
   it("rejects stale revisions, expired sessions and unknown targets without mutation", () => {
@@ -353,7 +353,7 @@ describe("Isolated demo backend", () => {
         {
           type: "create",
           name: "<script>",
-          username: "x@example.net",
+          username: "x@liquidnet.net",
           profile: "home500",
         },
         1,
@@ -366,7 +366,7 @@ describe("Isolated demo backend", () => {
         {
           type: "create",
           name: "Example Person",
-          username: "x@real.example",
+          username: "invalid-username",
           profile: "home500",
         },
         1,
@@ -379,7 +379,7 @@ describe("Isolated demo backend", () => {
         {
           type: "create",
           name: "Example Person",
-          username: "subscriber001@example.net",
+          username: "subscriber001@liquidnet.net",
           profile: "home500",
         },
         1,
@@ -404,7 +404,7 @@ describe("Isolated demo backend", () => {
         {
           type: "create",
           name: "Example Person",
-          username: "person@example.net",
+          username: "person@liquidnet.net",
           profile: "home500",
         },
         1,
@@ -454,7 +454,7 @@ describe("Isolated demo backend", () => {
       ),
     ).toThrow();
   });
-  it("resets corrupt or expired session storage and uses an in-memory fallback", () => {
+  it("resets corrupt storage and retains active browser session storage and uses an in-memory fallback", () => {
     const map = new Map<string, string>();
     const store = {
       getItem: (k: string) => map.get(k) || null,
@@ -469,7 +469,7 @@ describe("Isolated demo backend", () => {
     const a = load(store, now);
     expect(a.subscribers).toHaveLength(12864);
     const b = load(store, now + TTL + 1);
-    expect(b.id).not.toBe(a.id);
+    expect(b.id).toBe(a.id);
     const fail = {
       getItem: () => {
         throw Error();
@@ -665,8 +665,153 @@ describe("Network providers", () => {
       provider: "examplenet",
       status: "suspended",
     });
-    expect(migrated.providers[0].name).toBe("ExampleNet");
+    expect(migrated.providers[0].name).toBe("LiquidNet");
     old.subscriberChanges[0].provider = "missing";
     expect(() => unpack(old)).toThrow(/Invalid subscriber/);
+  });
+});
+
+describe("PPPoE and DHCP access types", () => {
+  it("inherits network defaults, supports subscriber overrides, and retains explicit types across network and profile changes", () => {
+    let s = seed(now);
+    const original = s;
+    s = apply(
+      s,
+      parseAction({
+        type: "save-provider",
+        id: "examplenet",
+        name: "ExampleNet",
+        connectionType: "dhcp",
+      }),
+      s.revision,
+      now,
+    );
+    expect(s.providers[0].connectionType).toBe("dhcp");
+    expect(original.providers[0].connectionType).toBe("pppoe");
+    expect(s.subscribers[0].connectionType).toBe("pppoe");
+    s = apply(
+      s,
+      parseAction({
+        type: "create",
+        name: "DHCP Service",
+        username: "dhcp.service@example.net",
+        profile: "home500",
+      }),
+      s.revision,
+      now,
+    );
+    expect(s.subscribers[0].connectionType).toBe("dhcp");
+    const dhcpId = s.subscribers[0].id;
+    s = apply(
+      s,
+      parseAction({
+        type: "create",
+        name: "PPP Service",
+        username: "ppp.service@example.net",
+        profile: "home500",
+        connectionType: "pppoe",
+      }),
+      s.revision,
+      now,
+    );
+    expect(s.subscribers[0].connectionType).toBe("pppoe");
+    const before = s;
+    const sub = s.subscribers.find((sub) => sub.id === dhcpId)!;
+    s = apply(
+      s,
+      parseAction({ type: "connection", id: dhcpId, connectionType: "pppoe" }),
+      s.revision,
+      now,
+    );
+    expect(
+      before.subscribers.find((sub) => sub.id === dhcpId)!.connectionType,
+    ).toBe("dhcp");
+    expect(s.subscribers.find((sub) => sub.id === dhcpId)).toMatchObject({
+      connectionType: "pppoe",
+      profile: sub.profile,
+      ip: sub.ip,
+      ipv6: sub.ipv6,
+      status: sub.status,
+    });
+    expect(s.events[0].detail).toContain("DHCP → PPPoE");
+    s = apply(
+      s,
+      { type: "profile", id: dhcpId, profile: "home100" },
+      s.revision,
+      now,
+    );
+    expect(s.subscribers.find((sub) => sub.id === dhcpId)!.connectionType).toBe(
+      "pppoe",
+    );
+    expect(unpack(JSON.parse(JSON.stringify(pack(s))))).toEqual(s);
+    expect(
+      querySubscribers(s, "", 0, 10, "all", "all", "all", "dhcp").total,
+    ).toBe(0);
+  });
+  it("rejects unsupported access types, unknown subscribers and stale revisions", () => {
+    const s = seed(now);
+    for (const connectionType of ["static", "PPPoE", "", null, 1]) {
+      expect(() =>
+        parseAction({ type: "connection", id: "sub-0001", connectionType }),
+      ).toThrow(/PPPoE or DHCP/);
+      expect(() =>
+        parseAction({ type: "save-provider", name: "Invalid", connectionType }),
+      ).toThrow(/PPPoE or DHCP/);
+      expect(() =>
+        parseAction({
+          type: "create",
+          name: "Invalid",
+          username: "invalid@example.net",
+          profile: "home100",
+          connectionType,
+        }),
+      ).toThrow(/PPPoE or DHCP/);
+    }
+    expect(() =>
+      apply(
+        s,
+        { type: "connection", id: "missing", connectionType: "dhcp" },
+        s.revision,
+        now,
+      ),
+    ).toThrow(/not found/);
+    expect(() =>
+      apply(
+        s,
+        { type: "connection", id: "sub-0001", connectionType: "dhcp" },
+        0,
+        now,
+      ),
+    ).toThrow(/configuration changed/);
+    expect(() =>
+      apply(
+        s,
+        { type: "connection", id: "sub-0001", connectionType: "pppoe" },
+        s.revision,
+        now,
+      ),
+    ).toThrow(/already uses/);
+  });
+  it("migrates saved providers and subscriber changes without connection fields and rejects corrupt types", () => {
+    let s = seed(now);
+    s = apply(s, { type: "suspend", id: "sub-0001" }, s.revision, now);
+    const old = JSON.parse(JSON.stringify(pack(s)));
+    old.providers.forEach(
+      (p: Record<string, unknown>) => delete p.connectionType,
+    );
+    old.subscriberChanges.forEach(
+      (sub: Record<string, unknown>) => delete sub.connectionType,
+    );
+    const restored = unpack(old);
+    expect(restored.providers[0].connectionType).toBe("pppoe");
+    expect(restored.subscribers[0]).toMatchObject({
+      connectionType: "pppoe",
+      status: "suspended",
+    });
+    old.subscriberChanges[0].connectionType = "unsupported";
+    expect(() => unpack(old)).toThrow(/Invalid subscriber/);
+    old.subscriberChanges[0].connectionType = "dhcp";
+    old.providers[0].connectionType = "unsupported";
+    expect(() => unpack(old)).toThrow(/Invalid provider/);
   });
 });

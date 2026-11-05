@@ -1,5 +1,12 @@
 import React, { useState } from "react";
-import { Action, Workspace, Profile, Provider } from "./simulator";
+import {
+  Action,
+  Workspace,
+  Profile,
+  Provider,
+  ConnectionType,
+  connectionTypeLabel,
+} from "./simulator";
 
 type Review = (action: Action, title: string, rows: [string, string][]) => void;
 export function ProviderManagement({
@@ -11,13 +18,11 @@ export function ProviderManagement({
 }) {
   const [editing, setEditing] = useState<Provider | null>(null);
   const [name, setName] = useState("");
+  const [connectionType, setConnectionType] = useState<ConnectionType>("pppoe");
   return (
     <section className="panel provider-management">
       <h2>{editing ? "Edit network provider" : "Add network provider"}</h2>
-      <p>
-        Organise fictional subscribers and service profiles by network provider.
-        All services remain simulated.
-      </p>
+      <p>Manage subscribers and service profiles by network provider.</p>
       <form
         className="provider-form"
         onSubmit={(e) => {
@@ -27,9 +32,17 @@ export function ProviderManagement({
               type: "save-provider",
               ...(editing ? { id: editing.id } : {}),
               name,
+              connectionType,
             },
             "Review network provider",
-            [["Network provider", name]],
+            [
+              ["Network provider", name],
+              ["Default connection type", connectionTypeLabel[connectionType]],
+              [
+                "Existing subscribers",
+                "Keep their configured connection types",
+              ],
+            ],
           );
         }}
       >
@@ -43,6 +56,18 @@ export function ProviderManagement({
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. City Fibre"
           />
+        </label>
+        <label>
+          Default connection type
+          <select
+            value={connectionType}
+            onChange={(e) =>
+              setConnectionType(e.target.value as ConnectionType)
+            }
+          >
+            <option value="pppoe">PPPoE</option>
+            <option value="dhcp">DHCP</option>
+          </select>
         </label>
         <button className="button primary">
           {editing ? "Review provider update" : "Review new provider"}
@@ -65,6 +90,7 @@ export function ProviderManagement({
           <thead>
             <tr>
               <th>Network provider</th>
+              <th>Default connection type</th>
               <th>Subscribers</th>
               <th>Service profiles</th>
               <th>Actions</th>
@@ -81,6 +107,7 @@ export function ProviderManagement({
               return (
                 <tr key={p.id}>
                   <td>{p.name}</td>
+                  <td>{connectionTypeLabel[p.connectionType]}</td>
                   <td>{subscribers.toLocaleString()}</td>
                   <td>{profiles}</td>
                   <td>
@@ -89,6 +116,7 @@ export function ProviderManagement({
                       onClick={() => {
                         setEditing(p);
                         setName(p.name);
+                        setConnectionType(p.connectionType);
                       }}
                     >
                       Edit {p.name}
@@ -124,7 +152,7 @@ export function ProviderManagement({
     </section>
   );
 }
-export function ServiceProfileEditor({
+export function ProfileEditor({
   state,
   review,
 }: {
@@ -176,7 +204,7 @@ export function ServiceProfileEditor({
       >
         <div className="form-grid">
           <label>
-            Service profile name
+            Catalogue profile name
             <input
               required
               minLength={2}

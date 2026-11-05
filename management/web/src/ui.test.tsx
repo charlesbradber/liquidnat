@@ -61,7 +61,7 @@ describe("Manager interactions", () => {
     fireEvent.click(
       screen.getByRole("button", { name: /Review VLAN correction/ }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Apply demo change" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply change" }));
     fireEvent.click(screen.getByRole("button", { name: "Overview" }));
     expect(
       screen.getByRole("region", { name: "Incidents (2 open)" }),
@@ -75,12 +75,10 @@ describe("Manager interactions", () => {
   it("uses the same redesigned overview when the PHP adapter supplies the workspace", async () => {
     const workspace = seed();
     window.history.replaceState({}, "", "/?backend=php");
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue({
-        ok: true,
-        json: async () => ({ csrf: "test-csrf", workspace: pack(workspace) }),
-      });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ csrf: "test-csrf", workspace: pack(workspace) }),
+    });
     vi.stubGlobal("fetch", fetchMock);
     render(<App />);
     await screen.findByRole("region", { name: "Gateways (2)" });
@@ -113,7 +111,7 @@ describe("Manager interactions", () => {
     expect(
       screen.getByText("Unchanged; assign the new profile separately"),
     ).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Apply demo change" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply change" }));
     expect(screen.getByRole("heading", { name: "Fibre 2500" })).toBeTruthy();
     expect(screen.getAllByText("0 assigned subscribers")).toHaveLength(1);
   });
@@ -123,7 +121,7 @@ describe("Manager interactions", () => {
       name: "Search all subscribers",
     });
     fireEvent.change(search, {
-      target: { value: "subscriber001@example.net" },
+      target: { value: "subscriber001@liquidnet.net" },
     });
     expect(
       within(
@@ -142,7 +140,7 @@ describe("Manager interactions", () => {
       screen.getByRole("button", { name: /Review addressing change/ }),
     );
     expect(screen.getByText("CGNAT → Static IPv4")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Apply demo change" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply change" }));
     fireEvent.change(search, { target: { value: "192.0.2.50" } });
     fireEvent.click(
       within(
@@ -185,14 +183,14 @@ describe("Manager interactions", () => {
     fireEvent.change(screen.getByLabelText("Subscriber name"), {
       target: { value: "Demo Person" },
     });
-    fireEvent.change(screen.getByLabelText("Demo username"), {
+    fireEvent.change(screen.getByLabelText("RADIUS username"), {
       target: { value: "demo.person" },
     });
     fireEvent.click(screen.getByRole("button", { name: /Review subscriber/ }));
     expect(
       screen.getByRole("heading", { name: "Review new subscriber" }),
     ).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Apply demo change" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply change" }));
     fireEvent.click(screen.getByRole("button", { name: /Subscribers/ }));
     fireEvent.change(
       screen.getByRole("textbox", { name: "Search subscribers" }),
@@ -202,7 +200,7 @@ describe("Manager interactions", () => {
     expect(screen.getByText(/of 1 subscribers/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "View Demo Person" }));
     fireEvent.click(screen.getByRole("button", { name: "Suspend service" }));
-    fireEvent.click(screen.getByRole("button", { name: "Apply demo change" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply change" }));
     expect(
       screen.getByText("Suspended", { selector: "span.badge" }),
     ).toBeTruthy();
@@ -215,12 +213,14 @@ describe("Manager interactions", () => {
       screen.getByRole("button", { name: /Review credential reset/ }),
     );
     expect(screen.getByText("None collected or changed")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Apply demo change" }));
-    expect(screen.getByText("The demo session is healthy")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Apply change" }));
+    expect(screen.getByText("The subscriber session is healthy")).toBeTruthy();
   });
   it("opens the tour, navigates a scenario, and resets only the current workspace", () => {
     render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "Explore demo" }));
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "Quick actions" })[0],
+    );
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getAllByRole("button").length).toBe(10);
     fireEvent.click(
@@ -230,21 +230,23 @@ describe("Manager interactions", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Review capacity increase" }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Apply demo change" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply change" }));
     expect(screen.getByRole("button", { name: "Pool expanded" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Reset demo" }));
     fireEvent.click(screen.getByRole("button", { name: "Reset workspace" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Reset workspace",
+      }),
+    );
     expect(
       screen.getByRole("heading", { name: "Network overview" }),
     ).toBeTruthy();
-    expect(screen.getByText("0 of 9 scenarios completed")).toBeTruthy();
+    expect(screen.getByText("3 services need attention")).toBeTruthy();
   });
-  it("keeps simulation labelling visible and has working network tabs", () => {
+  it("shows session storage status and has working network tabs", () => {
     render(<App />);
     expect(
-      screen.getByText(
-        "This is your playground. All network data and actions are simulated.",
-      ),
+      screen.getByText("Changes are saved for this browser session."),
     ).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Network" }));
     fireEvent.click(screen.getByRole("button", { name: "Routes" }));
@@ -260,10 +262,12 @@ it("adds a provider, builds its catalogue, and creates and transfers subscribers
   const view = render(<App />);
   const nav = (name: string) =>
     fireEvent.click(
-      screen.getAllByRole("button", { name: new RegExp("^" + name) })[0],
+      screen.getAllByRole("button", {
+        name: new RegExp("^" + name + "(?:\\s|$)"),
+      })[0],
     );
   const apply = () =>
-    fireEvent.click(screen.getByRole("button", { name: "Apply demo change" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply change" }));
   nav("Network providers");
   fireEvent.change(screen.getByLabelText("Provider name"), {
     target: { value: "City Fibre" },
@@ -271,28 +275,8 @@ it("adds a provider, builds its catalogue, and creates and transfers subscribers
   fireEvent.click(screen.getByRole("button", { name: "Review new provider" }));
   apply();
   expect(screen.getByRole("button", { name: "Edit City Fibre" })).toBeTruthy();
-  nav("Subscribers");
-  fireEvent.click(screen.getByRole("button", { name: "Add subscriber" }));
-  const emptyProviderSelect = screen.getByLabelText(
-    "Network provider",
-  ) as HTMLSelectElement;
-  const emptyProviderId = Array.from(emptyProviderSelect.options).find(
-    (o) => o.text === "City Fibre",
-  )!.value;
-  fireEvent.change(emptyProviderSelect, { target: { value: emptyProviderId } });
-  expect(
-    (
-      screen.getByRole("button", {
-        name: /Review subscriber/,
-      }) as HTMLButtonElement
-    ).disabled,
-  ).toBe(true);
-  expect(
-    screen.getByRole("option", { name: /No service profiles/ }),
-  ).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   nav("Service profiles");
-  fireEvent.change(screen.getByLabelText("Service profile name"), {
+  fireEvent.change(screen.getByLabelText("Catalogue profile name"), {
     target: { value: "City 200" },
   });
   const providerSelect = screen.getByLabelText(
@@ -311,7 +295,7 @@ it("adds a provider, builds its catalogue, and creates and transfers subscribers
   fireEvent.change(screen.getByLabelText("Subscriber name"), {
     target: { value: "Alex Morgan" },
   });
-  fireEvent.change(screen.getByLabelText("Demo username"), {
+  fireEvent.change(screen.getByLabelText("RADIUS username"), {
     target: { value: "city.alex" },
   });
   fireEvent.change(screen.getByLabelText("Network provider"), {
@@ -344,3 +328,73 @@ it("adds a provider, builds its catalogue, and creates and transfers subscribers
   nav("Network providers");
   expect(screen.getByRole("button", { name: "Edit City Fibre" })).toBeTruthy();
 }, 60000);
+
+it("configures a network RADIUS default and creates, filters and edits a DHCP subscriber", () => {
+  render(<App />);
+  fireEvent.click(screen.getByRole("button", { name: "RADIUS" }));
+  fireEvent.change(screen.getByLabelText("Connection type for LiquidNet"), {
+    target: { value: "dhcp" },
+  });
+  expect(screen.getByText("PPPoE → DHCP")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Apply change" }));
+  fireEvent.click(screen.getByRole("button", { name: "Network" }));
+  expect(
+    (
+      screen.getByLabelText(
+        "Connection type for LiquidNet",
+      ) as HTMLSelectElement
+    ).value,
+  ).toBe("dhcp");
+  fireEvent.click(screen.getByRole("button", { name: /^Subscribers/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Add subscriber" }));
+  expect(
+    (screen.getByLabelText("Connection type") as HTMLSelectElement).value,
+  ).toBe("dhcp");
+  fireEvent.change(screen.getByLabelText("Subscriber name"), {
+    target: { value: "DHCP Customer" },
+  });
+  fireEvent.change(screen.getByLabelText("RADIUS username"), {
+    target: { value: "dhcp.customer" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /Review subscriber/ }));
+  expect(
+    screen.getByText("IPoE / DHCP lease · MAC and circuit identity"),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Apply change" }));
+  fireEvent.change(screen.getByLabelText("Filter connection type"), {
+    target: { value: "dhcp" },
+  });
+  expect(screen.getByText(/of 1 subscribers/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "View DHCP Customer" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Change connection type" }),
+  );
+  fireEvent.change(screen.getByLabelText("Connection type"), {
+    target: { value: "pppoe" },
+  });
+  fireEvent.click(
+    screen.getByRole("button", { name: "Review connection type" }),
+  );
+  expect(screen.getByText("DHCP → PPPoE")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Apply change" }));
+  expect(screen.getByText("No subscribers found")).toBeTruthy();
+}, 60000);
+
+it("edits an interface, refreshes the session and withdraws its connected route", () => {
+  const view = render(<App />);
+  fireEvent.click(screen.getByRole("button", { name: "Network" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit mgmt0" }));
+  fireEvent.change(screen.getByLabelText("IPv4 address / prefix"), {
+    target: { value: "10.77.0.1/24" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save configuration" }));
+  expect(screen.getByText("10.77.0.1/24")).toBeTruthy();
+  view.unmount();
+  render(<App />);
+  fireEvent.click(screen.getByRole("button", { name: "Network" }));
+  expect(screen.getByText("10.77.0.1/24")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Disable mgmt0" }));
+  fireEvent.click(screen.getByRole("button", { name: "Routes" }));
+  const row = screen.getByText("10.77.0.0/24").closest("tr")!;
+  expect(within(row).getByText("Withdrawn")).toBeTruthy();
+});

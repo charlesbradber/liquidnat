@@ -71,7 +71,7 @@ try {
   header('ETag: "'.$state['revision'].'"');
   if($path==='/demo/api/v1/subscribers'){
    $query=is_string($_GET['q']??'')?substr($_GET['q']??'',0,128):'';$offset=max(0,min(15000,(int)($_GET['offset']??0)));$limit=max(1,min(50,(int)($_GET['limit']??10)));
-   $result=worker(['operation'=>'list','state'=>$state,'query'=>$query,'offset'=>$offset,'limit'=>$limit,'mode'=>$_GET['mode']??'all','status'=>$_GET['status']??'all','provider'=>$_GET['provider']??'all']);
+   $result=worker(['operation'=>'list','state'=>$state,'query'=>$query,'offset'=>$offset,'limit'=>$limit,'mode'=>$_GET['mode']??'all','status'=>$_GET['status']??'all','provider'=>$_GET['provider']??'all','connectionType'=>$_GET['connectionType']??'all']);
    if(!($result['ok']??false))fail(503,'WORKER_FAILED','Cannot query demo subscribers.');
    respond(200,[...$result['page'],'offset'=>$offset,'limit'=>$limit,'revision'=>$state['revision'],'simulation'=>true]);
   }

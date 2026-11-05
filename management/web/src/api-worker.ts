@@ -36,6 +36,7 @@ try {
           String(request.status || "all"),
           String(request.mode || "all"),
           String(request.provider || "all"),
+          String(request.connectionType || "all"),
         ),
       }),
     );

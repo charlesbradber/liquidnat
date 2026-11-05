@@ -1,4 +1,6 @@
+import { initialNetwork, routeLookup } from "./network";
 import type { Subscriber, Workspace } from "./simulator";
+import { connectionTypeLabel } from "./simulator";
 export type DiagnosticStep = {
   title: string;
   detail: string;
@@ -14,7 +16,7 @@ export function diagnose(
   const stages = [
     {
       title: "Circuit & access handoff",
-      detail: `${sub.circuit} · received VLAN ${sub.vlan} · expected ${sub.expectedVlan}`,
+      detail: `${connectionTypeLabel[sub.connectionType]} · ${sub.circuit} · received VLAN ${sub.vlan} · expected ${sub.expectedVlan}`,
       failed: sub.vlan !== sub.expectedVlan,
       code: "ACCESS_VLAN_MISMATCH",
     },
@@ -22,8 +24,12 @@ export function diagnose(
       title: "RADIUS authentication",
       detail:
         sub.status === "auth-rejected"
-          ? "Access-Reject · synthetic invalid credentials"
-          : "Simulated Access-Accept · realm example.net",
+          ? sub.connectionType === "dhcp"
+            ? "Access-Reject · synthetic MAC / circuit identity rejected"
+            : "Access-Reject · synthetic invalid credentials"
+          : sub.connectionType === "dhcp"
+            ? `Simulated DHCP/IPoE Access-Accept · MAC ${sub.mac} · circuit ${sub.circuit}`
+            : `Simulated PPPoE Access-Accept · realm ${workspace.radius?.realm || "liquidnet.net"}`,
       failed: sub.status === "auth-rejected",
       code: "AUTH_REJECTED",
     },
@@ -42,7 +48,7 @@ export function diagnose(
         sub.status === "suspended"
           ? "Suspended policy · IPv4 and IPv6 access blocked"
           : policy
-            ? `${policy.name} · ${policy.down}/${policy.up} Mb/s · simulated policy`
+            ? `${policy.name} · ${policy.down}/${policy.up} Mb/s · service policy`
             : "Assigned profile is missing",
       failed: sub.status === "suspended" || !policy,
       code:
@@ -52,9 +58,12 @@ export function diagnose(
     },
     {
       title: "Forwarding readiness",
-      detail: `${sub.gateway} · simulated upstream route available`,
-      failed: false,
-      code: "DEMO_FORWARDING_READY",
+      detail: routeLookup(workspace.network || initialNetwork(), "1.1.1.1"),
+      failed: routeLookup(
+        workspace.network || initialNetwork(),
+        "1.1.1.1",
+      ).startsWith("No installed"),
+      code: "FORWARDING_READY",
     },
   ];
   let blocked = false;
@@ -73,15 +82,15 @@ export function diagnose(
           ? "PREREQUISITE_FAILED"
           : step.failed
             ? step.code
-            : "DEMO_STAGE_READY",
+            : "STAGE_READY",
     };
   });
   result.push({
-    title: "Real traffic verification",
+    title: "Path verification",
     state: "unverified",
-    code: "LIVE_TRAFFIC_UNMEASURED",
+    code: "PROBE_NOT_RUN",
     detail:
-      "Return-path routing, upstream reachability, loss and actual throughput are unmeasured. This demo does not send packets.",
+      "Run a gateway-side packet probe to verify upstream reachability and return-path routing.",
   });
   return result;
 }
@@ -99,7 +108,7 @@ export function diagnosticBundle(
       simulation: true,
       packetEngineConnected: false,
       scope:
-        "Selected fictional subscriber only; excludes unrelated subscribers, NAT history and global audit details.",
+        "Selected subscriber only; excludes unrelated subscribers, NAT history and global audit details.",
     },
     subscriber: { ...sub },
     profile: workspace.profiles.find((p) => p.id === sub.profile),

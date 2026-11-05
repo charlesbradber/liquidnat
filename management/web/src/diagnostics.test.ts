@@ -55,3 +55,14 @@ describe("Fixture diagnostic evidence", () => {
     );
   });
 });
+
+it("describes PPPoE sessions and DHCP MAC/circuit identity without implying a PPP login for DHCP", () => {
+  const s = seed();
+  const sub = s.subscribers[0];
+  expect(diagnose(s, sub)[1].detail).toContain("PPPoE");
+  const steps = diagnose(s, { ...sub, connectionType: "dhcp" });
+  expect(steps[0].detail).toContain("DHCP");
+  expect(steps[1].detail).toContain(sub.mac);
+  expect(steps[1].detail).toContain(sub.circuit);
+  expect(steps[1].detail).not.toContain("PPPoE");
+});

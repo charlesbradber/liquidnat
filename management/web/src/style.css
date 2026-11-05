@@ -2825,3 +2825,13 @@ td small {
     scroll-behavior: auto !important;
   }
 }
+
+.journey-step.blocked,
+.journey-step.unverified {
+  opacity: 0.7;
+}
+.journey-step.blocked > span,
+.journey-step.unverified > span {
+  background: #eef1f5;
+  color: #667085;
+}

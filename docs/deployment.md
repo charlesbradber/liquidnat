@@ -4,7 +4,9 @@ The owner-selected live demo is **https://demo.liquidnat.com/**. SSH administrat
 
 ## Automatic deployment
 
-`.github/workflows/deploy-demo.yml` runs only on pushes to `main` that change `management/web/**`, `deploy/demo/**`, or that deployment workflow. Engine, unrelated landing page and ordinary documentation changes do not trigger it. Pull requests never deploy. The separate demo test workflow is also filtered to demo/API/deployment inputs.
+`.github/workflows/deploy-demo.yml` runs only on pushes to `main` or the dedicated `demo` branch that change `management/web/**`, `deploy/demo/**`, or that deployment workflow. Engine, unrelated landing page and ordinary documentation changes do not trigger it. Pull requests never deploy. The separate demo test workflow is also filtered to demo/API/deployment inputs.
+
+The `demo` branch is the live preview track: after local checks pass, fast-forward it to a reviewed feature commit and push. This publishes the same tested source without merging into `main`. Keep merges into `main` at roughly hourly checkpoints during active development, or sooner for a substantial release-ready batch, as requested by the owner. Do not force-push either branch. If `demo` has diverged, inspect and integrate that work on the feature branch before advancing it. Engine-only or documentation-only pushes on either branch still do not deploy. A later qualifying `main` push also publishes, so integrate the current preview before releasing a different main change.
 
 The build job has no deployment credentials. It installs the locked frontend dependencies using Node 22, runs model/DOM interaction tests, builds the static app, checks the archive boundary, and creates a deterministic release archive tagged with the source SHA. Only index.html, explicitly allowed browser assets, and an internal hash manifest enter the archive. PHP, `.env`, dotfiles, source files and the Cloudflare-only `_headers` file are excluded or rejected.
 

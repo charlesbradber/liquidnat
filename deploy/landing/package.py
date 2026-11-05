@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package only built browser assets; never PHP, credentials, or repository source."""
+"""Package only named PHP entry points, shared templates and browser assets."""
 import argparse
 import gzip
 import hashlib
@@ -9,7 +9,9 @@ from pathlib import Path
 import re
 import tarfile
 
-PAGES = frozenset({'radius.html', 'solutions.html', 'index.html', 'platform.html', 'compare.html', 'manager.html', 'resources.html', 'compare-netelastic.html', 'privacy.html', 'about.html', 'contact.html', 'gateway.html', 'news.html', '404.html'})
+PHP_PAGES = frozenset({'compare.php', 'about.php', 'manager.php', 'gateway.php', 'cgnat.php', 'privacy.php', 'news.php', 'solutions.php', 'performance.php', 'platform.php', '404.php', 'migration.php', 'compare-netelastic.php', 'contact.php', 'radius.php', 'deployment.php', 'index.php', 'resources.php'})
+INCLUDES = frozenset({"includes/header.php", "includes/footer.php"})
+PAGES = PHP_PAGES | INCLUDES
 ALLOWED_ASSET = re.compile(r'assets/[A-Za-z0-9_-][A-Za-z0-9_.-]*\.(?:js|css|svg|png|jpe?g|webp|ico|woff2?)\Z')
 MAX_FILES = 128
 MAX_UNPACKED = 20 * 1024 * 1024
@@ -29,9 +31,9 @@ def package(dist: Path, destination: Path, commit: str):
         if name not in PAGES and not ALLOWED_ASSET.fullmatch(name):
             raise ValueError(f'Unexpected build output: {name}')
         files[name] = path.read_bytes()
-    if 'index.html' not in files or len(files) > MAX_FILES or sum(map(len, files.values())) > MAX_UNPACKED:
+    if 'index.php' not in files or len(files) > MAX_FILES or sum(map(len, files.values())) > MAX_UNPACKED:
         raise ValueError('Missing index or release exceeds deployment bounds')
-    for reference in re.findall(r'(?:src|href)=["\'](/assets/[^"\']+)["\']', files['index.html'].decode()):
+    for reference in re.findall(r'(?:src|href)=["\'](/assets/[^"\']+)["\']', files['index.php'].decode()):
         if reference[1:] not in files:
             raise ValueError(f'Index references a missing asset: {reference}')
     manifest = {'schema': 1, 'commit': commit, 'files': {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}}

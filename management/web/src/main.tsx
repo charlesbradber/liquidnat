@@ -1,3 +1,4 @@
+import { diagnose, diagnosticBundle } from "./diagnostics";
 import React, { useEffect, useRef, useState, useMemo } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -91,6 +92,7 @@ type Modal = {
   kind:
     | "preview"
     | "create"
+    | "create-profile"
     | "profile"
     | "subscriber"
     | "addressing"
@@ -232,6 +234,9 @@ export function App() {
   const [mappingResults, setMappingResults] = useState<ReturnType<
     typeof lookup
   > | null>(null);
+  const [planName, setPlanName] = useState("");
+  const [planDown, setPlanDown] = useState("2500");
+  const [planUp, setPlanUp] = useState("1000");
   const [createName, setCreateName] = useState("");
   const [createUser, setCreateUser] = useState("");
   const [createProfile, setCreateProfile] = useState("home500");
@@ -1451,6 +1456,24 @@ export function App() {
                 subscriber. Speed policies and CoA are simulated; no real
                 traffic is shaped.
               </div>
+              <div className="modal-actions">
+                <button
+                  className="button primary"
+                  disabled={state.profiles.length >= 32}
+                  onClick={() => {
+                    setPlanName("");
+                    setPlanDown("2500");
+                    setPlanUp("1000");
+                    setFormError("");
+                    setModal({
+                      kind: "create-profile",
+                      title: "Create service profile",
+                    });
+                  }}
+                >
+                  <Plus size={16} /> Create service profile
+                </button>
+              </div>
               <div className="profile-grid">
                 {state.profiles.map((p) => (
                   <section className="panel profile-card" key={p.id}>
@@ -2357,58 +2380,24 @@ export function App() {
                     </div>
                   </div>
                   <div className="journey">
-                    {[
-                      {
-                        title: "Circuit & access handoff",
-                        detail: `${chosen.circuit} · received VLAN ${chosen.vlan} · expected ${chosen.expectedVlan}`,
-                        failed: chosen.status === "vlan-mismatch",
-                      },
-                      {
-                        title: "RADIUS authentication",
-                        detail:
-                          chosen.status === "auth-rejected"
-                            ? "Access-Reject · reason: invalid credentials"
-                            : "Access-Accept · realm example.net",
-                        failed: chosen.status === "auth-rejected",
-                      },
-                      {
-                        title: "Address allocation & NAT",
-                        detail:
-                          chosen.status === "pool-exhausted"
-                            ? "Admission blocked · pool is at capacity"
-                            : `${chosen.ip} · dual-stack policy installed`,
-                        failed: chosen.status === "pool-exhausted",
-                      },
-                      {
-                        title: "Service policy",
-                        detail:
-                          chosen.status === "suspended"
-                            ? "Suspended policy · IPv4 and IPv6 access blocked"
-                            : `${profile(chosen).name} · ${profile(chosen).down}/${profile(chosen).up} Mb/s`,
-                        failed: chosen.status === "suspended",
-                      },
-                      {
-                        title: "Forwarding readiness",
-                        detail:
-                          chosen.status === "online"
-                            ? `${chosen.gateway} · static upstream route available`
-                            : "Waiting for the earlier issue to be resolved",
-                        failed: chosen.status !== "online",
-                      },
-                    ].map((step, i) => (
+                    {diagnose(state, chosen).map((step, i) => (
                       <div
-                        className={`journey-step ${step.failed ? "failed" : ""}`}
+                        className={`journey-step ${step.state}`}
                         key={step.title}
                       >
                         <span>
-                          {step.failed ? (
+                          {step.state === "failed" ? (
                             <TriangleAlert size={17} />
-                          ) : (
+                          ) : step.state === "passed" ? (
                             <Check size={17} />
+                          ) : (
+                            <Clock3 size={17} />
                           )}
                         </span>
                         <div>
-                          <small>STEP {i + 1}</small>
+                          <small>
+                            STEP {i + 1} · {step.state.toUpperCase()}
+                          </small>
                           <h3>{step.title}</h3>
                           <p>{step.detail}</p>
                         </div>
@@ -2529,6 +2518,17 @@ export function App() {
                       Restore service
                     </button>
                   )}
+                  <button
+                    className="button secondary"
+                    onClick={() =>
+                      DownloadJson(
+                        diagnosticBundle(state, chosen),
+                        `liquidnat-demo-diagnostics-${chosen.id}.json`,
+                      )
+                    }
+                  >
+                    <Download size={15} /> Export subscriber evidence
+                  </button>
                   <div className="diagnostic-code">
                     <Terminal size={14} />
                     {chosen.status === "online"
@@ -2745,6 +2745,90 @@ export function App() {
             <h2 id="modal-title">{modal.title}</h2>
             {modal.description && (
               <p className="modal-description">{modal.description}</p>
+            )}
+            {modal.kind === "create-profile" && (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  preview(
+                    {
+                      type: "create-profile",
+                      name: planName,
+                      down: Number(planDown),
+                      up: Number(planUp),
+                    },
+                    "Review service profile",
+                    [
+                      ["Name", planName.trim()],
+                      ["Download", `${planDown} Mb/s`],
+                      ["Upload", `${planUp} Mb/s`],
+                      [
+                        "Existing subscribers",
+                        "Unchanged; assign the new profile separately",
+                      ],
+                      [
+                        "Policy",
+                        "Immutable simulated speed policy; IPv4 mode stays per subscriber",
+                      ],
+                    ],
+                  );
+                }}
+              >
+                <div className="form-grid">
+                  <label>
+                    Profile name
+                    <input
+                      required
+                      minLength={2}
+                      maxLength={48}
+                      value={planName}
+                      onChange={(e) => setPlanName(e.target.value)}
+                      placeholder="e.g. Fibre 2500"
+                    />
+                  </label>
+                  <label>
+                    Download speed (Mb/s)
+                    <input
+                      type="number"
+                      required
+                      min={1}
+                      max={100000}
+                      step={1}
+                      value={planDown}
+                      onChange={(e) => setPlanDown(e.target.value)}
+                    />
+                  </label>
+                  <label>
+                    Upload speed (Mb/s)
+                    <input
+                      type="number"
+                      required
+                      min={1}
+                      max={100000}
+                      step={1}
+                      value={planUp}
+                      onChange={(e) => setPlanUp(e.target.value)}
+                    />
+                  </label>
+                </div>
+                <p className="modal-description">
+                  Create a new policy to preserve existing assignments. Speeds
+                  are simulated, up to 100 Gb/s. No real traffic is shaped.
+                </p>
+                {formError && <p role="alert">{formError}</p>}
+                <div className="modal-actions">
+                  <button
+                    type="button"
+                    className="button secondary"
+                    onClick={() => setModal(null)}
+                  >
+                    Cancel
+                  </button>
+                  <button className="button primary">
+                    Review profile <ArrowRight size={14} />
+                  </button>
+                </div>
+              </form>
             )}
             {modal.kind === "create" && (
               <form

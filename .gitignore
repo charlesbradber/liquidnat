@@ -3,3 +3,9 @@ benchmarks/results/
 __pycache__/
 *.profraw
 *.pcap
+node_modules/
+dist/
+*.tsbuildinfo
+.openai/source-state.json
+.openai/*.zip
+management/api/var/

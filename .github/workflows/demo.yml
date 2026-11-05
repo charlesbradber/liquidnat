@@ -1,0 +1,23 @@
+name: Manager demo and API
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  demo:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install PHP simulator dependencies
+        run: sudo apt-get update && sudo apt-get install -y php-cli php-sqlite3 php-mbstring
+      - run: npm ci --no-audit --no-fund
+        working-directory: management/web
+      - run: npm test
+        working-directory: management/web
+      - run: npm run build && npm run build:api
+        working-directory: management/web
+      - run: python3 tests/demo_api.py

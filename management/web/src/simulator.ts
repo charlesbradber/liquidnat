@@ -19,6 +19,9 @@ export type Subscriber = {
   circuit: string;
   ip: string;
   ipv6: string;
+  ipv6Address: string;
+  mac: string;
+  addressMode: AddressMode;
   profile: string;
   status: Status;
   vlan: number;
@@ -52,8 +55,14 @@ export type Mapping = {
   started: string;
   ended: string | null;
 };
+export type AddressMode = "cgnat" | "direct" | "static";
+export const addressModeLabel: Record<AddressMode, string> = {
+  cgnat: "CGNAT",
+  direct: "Direct IPv4",
+  static: "Static IPv4",
+};
 export type Workspace = {
-  schema: 1;
+  schema: 2;
   id: string;
   created: number;
   expires: number;
@@ -68,6 +77,7 @@ export type Workspace = {
   completed: string[];
   poolCapacity: number;
   poolUsed: number;
+  poolExpanded: boolean;
   backupAt: string | null;
   mfa: boolean;
   retention: number;
@@ -75,6 +85,7 @@ export type Workspace = {
 export type Action =
   | { type: "create"; name: string; username: string; profile: string }
   | { type: "profile"; id: string; profile: string }
+  | { type: "addressing"; id: string; mode: AddressMode; staticIp?: string }
   | { type: "suspend" | "restore" | "fix-auth" | "fix-vlan"; id: string }
   | {
       type:
@@ -87,10 +98,122 @@ export type Action =
     }
   | { type: "settings"; mfa: boolean; retention: number };
 export const TTL = 2 * 60 * 60 * 1000;
-export const MAX_SUBSCRIBERS = 250;
-export const STORAGE_KEY = "liquidnat-demo-v1";
+export const DEMO_SUBSCRIBERS = 12864;
+export const MAX_SUBSCRIBERS = 15000;
+export const STORAGE_KEY = "liquidnat-demo-v2";
+export function subscriberIp(index: number, mode: AddressMode) {
+  const value = index + 10;
+  const prefix =
+    mode === "cgnat" ? "100.64" : mode === "static" ? "198.18" : "198.19";
+  return `${prefix}.${Math.floor(value / 254)}.${(value % 254) + 1}`;
+}
+export function subscriberMac(index: number) {
+  return `02:4c:4e:${index.toString(16).padStart(6, "0").match(/../g)!.join(":")}`;
+}
 const iso = (now: number) => new Date(now).toISOString();
 export const uid = () => crypto.randomUUID();
+export function validateStaticIp(value: string): string {
+  const ip = value.trim();
+  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip))
+    throw new DemoError("VALIDATION", "Enter a valid IPv4 address.");
+  const octets = ip.split(".").map(Number);
+  if (octets.some((n) => n > 255) || octets[3] === 0 || octets[3] === 255)
+    throw new DemoError(
+      "VALIDATION",
+      "Use a host address, not a network or broadcast address.",
+    );
+  const [a, b, c] = octets;
+  if (
+    !(
+      (a === 198 && (b === 18 || b === 19)) ||
+      (a === 192 && b === 0 && c === 2) ||
+      (a === 198 && b === 51 && c === 100) ||
+      (a === 203 && b === 0 && c === 113)
+    )
+  )
+    throw new DemoError(
+      "VALIDATION",
+      "Use a reserved demo address: 198.18.0.0/15, 192.0.2.0/24, 198.51.100.0/24, or 203.0.113.0/24.",
+    );
+  return octets.join(".");
+}
+export function subscriberPrefix(index: number) {
+  const third = Math.floor(index / 256).toString(16),
+    fourth = ((index % 256) * 256).toString(16);
+  return fourth === "0"
+    ? third === "0"
+      ? "2001:db8::/56"
+      : `2001:db8:${third}::/56`
+    : `2001:db8:${third}:${fourth}::/56`;
+}
+const normalizedQueries = new Map<string, string>();
+function normalizedIpv6(value: string) {
+  const cached = normalizedQueries.get(value);
+  if (cached) return cached;
+  let result: string;
+  try {
+    result = new URL(`http://[${value.split("/")[0]}]/`).hostname;
+  } catch {
+    result = value.toLowerCase();
+  }
+  if (normalizedQueries.size >= 32)
+    normalizedQueries.delete(normalizedQueries.keys().next().value!);
+  normalizedQueries.set(value, result);
+  return result;
+}
+export function matchesSubscriber(sub: Subscriber, query: string) {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  const fields = [
+    sub.name,
+    sub.username,
+    sub.circuit,
+    sub.ip,
+    sub.ipv6,
+    sub.ipv6Address,
+    sub.mac,
+    sub.id,
+    addressModeLabel[sub.addressMode],
+  ];
+  if (fields.some((v) => v.toLowerCase().includes(q))) return true;
+  const mac = q.replace(/[:.\-]/g, "");
+  if (
+    mac.length >= 4 &&
+    /^[a-f0-9]+$/.test(mac) &&
+    sub.mac.replaceAll(":", "").includes(mac)
+  )
+    return true;
+  return (
+    q.includes(":") &&
+    (normalizedIpv6(q) === `[${sub.ipv6Address}]` ||
+      normalizedIpv6(q) === `[${sub.ipv6.split("/")[0]}]`)
+  );
+}
+export function querySubscribers(
+  s: Workspace,
+  query = "",
+  offset = 0,
+  limit = 10,
+  status = "all",
+  mode = "all",
+) {
+  const matches = s.subscribers.filter(
+    (sub) =>
+      matchesSubscriber(sub, query) &&
+      (status === "all" ||
+        (status === "issues"
+          ? !["online", "suspended"].includes(sub.status)
+          : sub.status === status)) &&
+      (mode === "all" || sub.addressMode === mode),
+  );
+  return {
+    items: matches.slice(
+      Math.max(0, offset),
+      Math.max(0, offset) + Math.min(50, Math.max(1, limit)),
+    ),
+    total: matches.length,
+  };
+}
 export function seed(now = Date.now(), id: string = uid()): Workspace {
   const first = [
     "Alex",
@@ -126,7 +249,7 @@ export function seed(now = Date.now(), id: string = uid()): Workspace {
       down: 100,
       up: 20,
       price: 25,
-      nat: "Shared IPv4 + IPv6",
+      nat: "Per-subscriber IPv4 + IPv6",
     },
     {
       id: "home500",
@@ -134,7 +257,7 @@ export function seed(now = Date.now(), id: string = uid()): Workspace {
       down: 500,
       up: 100,
       price: 39,
-      nat: "Shared IPv4 + IPv6",
+      nat: "Per-subscriber IPv4 + IPv6",
     },
     {
       id: "home1000",
@@ -142,23 +265,32 @@ export function seed(now = Date.now(), id: string = uid()): Workspace {
       down: 1000,
       up: 200,
       price: 55,
-      nat: "Shared IPv4 + IPv6",
+      nat: "Per-subscriber IPv4 + IPv6",
     },
   ];
-  const subscribers: Subscriber[] = Array.from({ length: 128 }, (_, i) => ({
-    id: `sub-${String(i + 1).padStart(4, "0")}`,
-    name: `${first[i % 12]} ${last[Math.floor(i / 12) % 11]}`,
-    username: `subscriber${String(i + 1).padStart(3, "0")}@example.net`,
-    circuit: `LN-${String(i + 1).padStart(5, "0")}`,
-    ip: `100.64.0.${i + 10}`,
-    ipv6: `2001:db8:100:${((i + 1) * 256).toString(16)}::/56`,
-    profile: profiles[i % 3].id,
-    status: "online",
-    vlan: 200,
-    expectedVlan: 200,
-    since: iso(now - (i + 1) * 270000),
-    gateway: "gateway-01",
-  }));
+  const subscribers: Subscriber[] = Array.from(
+    { length: DEMO_SUBSCRIBERS },
+    (_, i) => ({
+      id: `sub-${String(i + 1).padStart(4, "0")}`,
+      name: `${first[i % 12]} ${last[Math.floor(i / 12) % 11]}`,
+      username: `subscriber${String(i + 1).padStart(3, "0")}@example.net`,
+      circuit: `LN-${String(i + 1).padStart(5, "0")}`,
+      ip: subscriberIp(
+        i,
+        i % 10 === 9 ? "static" : i % 10 >= 7 ? "direct" : "cgnat",
+      ),
+      ipv6: subscriberPrefix(i),
+      ipv6Address: `2001:db8:ffff:${(i + 1).toString(16)}::2`,
+      mac: subscriberMac(i),
+      addressMode: i % 10 === 9 ? "static" : i % 10 >= 7 ? "direct" : "cgnat",
+      profile: profiles[i % 3].id,
+      status: "online",
+      vlan: 200,
+      expectedVlan: 200,
+      since: iso(now - (i + 1) * 270000),
+      gateway: "gateway-01",
+    }),
+  );
   Object.assign(subscribers[125], {
     name: "Jordan Avery",
     status: "auth-rejected",
@@ -174,9 +306,10 @@ export function seed(now = Date.now(), id: string = uid()): Workspace {
     name: "Quinn Taylor",
     status: "pool-exhausted",
     ip: "—",
+    addressMode: "cgnat",
   });
   return {
-    schema: 1,
+    schema: 2,
     id,
     created: now,
     expires: now + TTL,
@@ -214,8 +347,9 @@ export function seed(now = Date.now(), id: string = uid()): Workspace {
     ],
     jobs: [],
     completed: [],
-    poolCapacity: 128,
-    poolUsed: 128,
+    poolCapacity: subscribers.filter((s) => s.addressMode === "cgnat").length,
+    poolUsed: subscribers.filter((s) => s.addressMode === "cgnat").length,
+    poolExpanded: false,
     backupAt: null,
     mfa: false,
     retention: 30,
@@ -225,7 +359,7 @@ export function seed(now = Date.now(), id: string = uid()): Workspace {
         port: 40012,
         protocol: "TCP",
         subscriber: "sub-0001",
-        privateIp: "100.64.0.10",
+        privateIp: subscribers[0].ip,
         privatePort: 52140,
         started: iso(now - 3600000),
         ended: null,
@@ -235,11 +369,26 @@ export function seed(now = Date.now(), id: string = uid()): Workspace {
         port: 40013,
         protocol: "UDP",
         subscriber: "sub-0002",
-        privateIp: "100.64.0.11",
+        privateIp: subscribers[1].ip,
         privatePort: 51820,
         started: iso(now - 1800000),
         ended: null,
       },
+      ...subscribers
+        .filter(
+          (sub, i) =>
+            i > 1 && sub.addressMode === "cgnat" && sub.status === "online",
+        )
+        .map((sub) => ({
+          publicIp: "203.0.113.11",
+          port: 20000 + Number(sub.id.slice(4)),
+          protocol: "TCP" as const,
+          subscriber: sub.id,
+          privateIp: sub.ip,
+          privatePort: 51000 + (Number(sub.id.slice(4)) % 10000),
+          started: iso(now - 3600000),
+          ended: null,
+        })),
     ],
   };
 }
@@ -281,14 +430,25 @@ export function apply(
       "REVISION_CONFLICT",
       "The configuration changed. Review it again before applying.",
     );
-  const s = structuredClone(source);
+  // Copy bounded collections, then only the subscriber or mapping being changed.
+  // Full 12k-row clones on every audit-only mutation would make the demo sluggish.
+  const s: Workspace = {
+    ...source,
+    subscribers: source.subscribers.slice(),
+    events: source.events.slice(),
+    jobs: source.jobs.slice(),
+    mappings: source.mappings.slice(),
+    completed: source.completed.slice(),
+  };
   const find = (id: string) => {
-    const sub = s.subscribers.find((x) => x.id === id);
-    if (!sub)
+    const index = s.subscribers.findIndex((x) => x.id === id);
+    if (index < 0)
       throw new DemoError(
         "NOT_FOUND",
         "Subscriber not found in this workspace.",
       );
+    const sub = { ...s.subscribers[index] };
+    s.subscribers[index] = sub;
     return sub;
   };
   const profile = (id: string) => {
@@ -301,7 +461,7 @@ export function apply(
     if (s.subscribers.length >= MAX_SUBSCRIBERS)
       throw new DemoError(
         "CAPACITY",
-        "This demo is limited to 250 subscribers.",
+        "This demo is limited to 15,000 subscribers.",
       );
     if (!/^[a-zA-Z0-9 .'-]{2,64}$/.test(action.name.trim()))
       throw new DemoError(
@@ -326,8 +486,11 @@ export function apply(
       name: action.name.trim(),
       username: action.username.toLowerCase(),
       circuit: `LN-${String(i).padStart(5, "0")}`,
-      ip: `100.64.1.${i - 128}`,
-      ipv6: `2001:db8:200:${((i - 128) * 256).toString(16)}::/56`,
+      ip: subscriberIp(i - 1, "direct"),
+      ipv6: subscriberPrefix(i - 1),
+      ipv6Address: `2001:db8:ffff:${i.toString(16)}::2`,
+      mac: subscriberMac(i - 1),
+      addressMode: "direct",
       profile: action.profile,
       status: "online",
       vlan: 200,
@@ -341,6 +504,86 @@ export function apply(
       "Subscribers",
       "Subscriber connected",
       `${action.name.trim()} · policy revision ${s.revision + 1} · simulated Access-Accept.`,
+      now,
+    );
+  } else if (action.type === "addressing") {
+    const sub = find(action.id);
+    if (!["cgnat", "direct", "static"].includes(action.mode))
+      throw new DemoError("VALIDATION", "Choose a valid IPv4 mode.");
+    const index = Number(sub.id.replace("sub-", "")) - 1;
+    const nextIp =
+      action.mode === "static"
+        ? validateStaticIp(action.staticIp || "")
+        : subscriberIp(index, action.mode);
+    if (
+      s.subscribers.some((other) => other.id !== sub.id && other.ip === nextIp)
+    )
+      throw new DemoError(
+        "ADDRESS_IN_USE",
+        "That IPv4 address is already assigned to another subscriber.",
+      );
+    if (
+      sub.addressMode !== "cgnat" &&
+      action.mode === "cgnat" &&
+      s.poolUsed >= s.poolCapacity
+    )
+      throw new DemoError(
+        "CAPACITY",
+        "CGNAT pool is full. Expand capacity in CGNAT before moving this service.",
+      );
+    if (sub.addressMode === action.mode && sub.ip === nextIp)
+      throw new DemoError(
+        "INVALID_STATE",
+        "This subscriber already has that addressing configuration.",
+      );
+    const oldMode = sub.addressMode,
+      oldIp = sub.ip;
+    s.mappings = s.mappings.map((mapping) =>
+      mapping.subscriber === sub.id && !mapping.ended
+        ? { ...mapping, ended: iso(now) }
+        : mapping,
+    );
+    if (oldMode === "cgnat" && action.mode !== "cgnat") s.poolUsed--;
+    if (oldMode !== "cgnat" && action.mode === "cgnat") s.poolUsed++;
+    sub.addressMode = action.mode;
+    sub.ip = nextIp;
+    if (sub.status === "pool-exhausted" && action.mode !== "cgnat") {
+      sub.status = "online";
+      complete(s, "pool");
+    }
+    if (action.mode === "cgnat") {
+      if (s.mappings.length >= 20000)
+        throw new DemoError(
+          "CAPACITY",
+          "Demo mapping history is full. Reset the workspace to continue.",
+        );
+      let port = 40000 + index;
+      while (
+        s.mappings.some(
+          (m) =>
+            !m.ended &&
+            m.publicIp === "203.0.113.10" &&
+            m.port === port &&
+            m.protocol === "TCP",
+        )
+      )
+        port++;
+      s.mappings.push({
+        publicIp: "203.0.113.10",
+        port,
+        protocol: "TCP",
+        subscriber: sub.id,
+        privateIp: nextIp,
+        privatePort: 52000 + (index % 10000),
+        started: iso(now),
+        ended: null,
+      });
+    }
+    event(
+      s,
+      "Addressing",
+      "Subscriber addressing changed",
+      `${sub.name}: ${addressModeLabel[oldMode]} (${oldIp}) → ${addressModeLabel[action.mode]} (${nextIp}). Simulated IPv4 reconnect; existing NAT mappings closed, IPv6 prefix retained.`,
       now,
     );
   } else if (action.type === "profile") {
@@ -391,7 +634,11 @@ export function apply(
           "No credential rejection to resolve.",
         );
       sub.status = "online";
-      sub.ip = "100.64.0.135";
+      if (sub.addressMode !== "static" || sub.ip === "—")
+        sub.ip = subscriberIp(
+          Number(sub.id.replace("sub-", "")) - 1,
+          sub.addressMode,
+        );
       complete(s, "password");
       event(
         s,
@@ -405,7 +652,11 @@ export function apply(
         throw new DemoError("INVALID_STATE", "No VLAN mismatch to resolve.");
       sub.vlan = sub.expectedVlan;
       sub.status = "online";
-      sub.ip = "100.64.0.136";
+      if (sub.addressMode !== "static" || sub.ip === "—")
+        sub.ip = subscriberIp(
+          Number(sub.id.replace("sub-", "")) - 1,
+          sub.addressMode,
+        );
       complete(s, "vlan");
       event(
         s,
@@ -416,23 +667,29 @@ export function apply(
       );
     }
   } else if (action.type === "expand-pool") {
-    if (s.poolCapacity >= 256)
+    if (s.poolExpanded)
       throw new DemoError(
         "INVALID_STATE",
         "The demo pool has already been expanded.",
       );
-    s.poolCapacity = 256;
-    for (const sub of s.subscribers)
-      if (sub.status === "pool-exhausted") {
-        sub.status = "online";
-        sub.ip = "100.64.0.137";
-      }
+    const previousCapacity = s.poolCapacity;
+    s.poolCapacity = 16384;
+    s.poolExpanded = true;
+    s.subscribers = s.subscribers.map((sub) =>
+      sub.status === "pool-exhausted"
+        ? {
+            ...sub,
+            status: "online",
+            ip: subscriberIp(Number(sub.id.slice(4)) - 1, sub.addressMode),
+          }
+        : sub,
+    );
     complete(s, "pool");
     event(
       s,
       "CGNAT",
       "Pool capacity expanded",
-      "Subscriber admission capacity 128 → 256. Existing mappings retained.",
+      `Subscriber admission capacity ${previousCapacity.toLocaleString()} → 16,384. Existing mappings retained.`,
       now,
     );
   } else if (
@@ -532,6 +789,17 @@ export function parseAction(value: unknown): Action {
     };
   if (type === "profile")
     return { type, id: text("id"), profile: text("profile") };
+  if (type === "addressing") {
+    const mode = text("mode");
+    if (!["cgnat", "direct", "static"].includes(mode))
+      throw new DemoError("VALIDATION", "Invalid IPv4 mode.");
+    return {
+      type,
+      id: text("id"),
+      mode: mode as AddressMode,
+      ...(mode === "static" ? { staticIp: text("staticIp", 32) } : {}),
+    };
+  }
   if (
     type === "suspend" ||
     type === "restore" ||
@@ -593,33 +861,125 @@ export function tick(source: Workspace, now = Date.now()): Workspace {
   s.revision++;
   return s;
 }
+export type PackedWorkspace = Omit<Workspace, "subscribers" | "mappings"> & {
+  compact: true;
+  subscriberChanges: Subscriber[];
+  mappingChanges: Mapping[];
+};
+const mappingKey = (m: Mapping) =>
+  `${m.publicIp}:${m.port}/${m.protocol}/${m.started}`;
+const baselines = new Map<
+  string,
+  { subscribers: Map<string, Subscriber>; mappings: Map<string, Mapping> }
+>();
+export function pack(s: Workspace): PackedWorkspace {
+  const key = `${s.id}/${s.created}`;
+  let baseline = baselines.get(key);
+  if (!baseline) {
+    const base = seed(s.created, s.id);
+    baseline = {
+      subscribers: new Map(base.subscribers.map((sub) => [sub.id, sub])),
+      mappings: new Map(base.mappings.map((m) => [mappingKey(m), m])),
+    };
+    if (baselines.size >= 2) baselines.delete(baselines.keys().next().value!);
+    baselines.set(key, baseline);
+  }
+  const originals = baseline.subscribers,
+    mappings = baseline.mappings;
+  const { subscribers, mappings: allMappings, ...metadata } = s;
+  return {
+    ...metadata,
+    compact: true,
+    subscriberChanges: subscribers.filter((sub) => {
+      const original = originals.get(sub.id);
+      return (
+        !original ||
+        (Object.keys(original) as (keyof Subscriber)[]).some(
+          (key) => key !== "gateway" && original[key] !== sub[key],
+        )
+      );
+    }),
+    mappingChanges: allMappings.filter((m) => {
+      const original = mappings.get(mappingKey(m));
+      return (
+        !original ||
+        (Object.keys(original) as (keyof Mapping)[]).some(
+          (key) => original[key] !== m[key],
+        )
+      );
+    }),
+  };
+}
+export function unpack(value: PackedWorkspace): Workspace {
+  if (
+    !value ||
+    value.schema !== 2 ||
+    value.compact !== true ||
+    typeof value.id !== "string" ||
+    !Number.isFinite(value.created) ||
+    !Array.isArray(value.subscriberChanges) ||
+    value.subscriberChanges.length > MAX_SUBSCRIBERS ||
+    !Array.isArray(value.mappingChanges) ||
+    value.mappingChanges.length > 20000 ||
+    !Array.isArray(value.events) ||
+    value.events.length > 100 ||
+    !Array.isArray(value.jobs) ||
+    value.jobs.length > 20 ||
+    !Array.isArray(value.completed)
+  )
+    throw new DemoError("VALIDATION", "Invalid stored workspace.");
+  const base = seed(value.created, value.id);
+  const changes = new Map(value.subscriberChanges.map((sub) => [sub.id, sub]));
+  const known = new Set(base.subscribers.map((sub) => sub.id));
+  const subscribers = [
+    ...value.subscriberChanges.filter((sub) => !known.has(sub.id)),
+    ...base.subscribers.map((sub) => changes.get(sub.id) || sub),
+  ];
+  if (
+    subscribers.length > MAX_SUBSCRIBERS ||
+    subscribers.some(
+      (sub) =>
+        typeof sub.name !== "string" ||
+        typeof sub.mac !== "string" ||
+        typeof sub.ipv6Address !== "string" ||
+        !["cgnat", "direct", "static"].includes(sub.addressMode),
+    )
+  )
+    throw new DemoError("VALIDATION", "Invalid subscriber state.");
+  for (const sub of subscribers)
+    if (sub.status === "online") sub.gateway = value.active;
+  const mappingChanges = new Map(
+    value.mappingChanges.map((m) => [mappingKey(m), m]),
+  );
+  const knownMappings = new Set(base.mappings.map(mappingKey));
+  const mappings = [
+    ...base.mappings.map((m) => mappingChanges.get(mappingKey(m)) || m),
+    ...value.mappingChanges.filter((m) => !knownMappings.has(mappingKey(m))),
+  ];
+  const {
+    compact,
+    subscriberChanges,
+    mappingChanges: ignored,
+    ...metadata
+  } = value;
+  return { ...metadata, subscribers, mappings };
+}
 export function load(
   storage: Pick<Storage, "getItem" | "setItem" | "removeItem">,
   now = Date.now(),
 ): Workspace {
   try {
     const raw = storage.getItem(STORAGE_KEY);
-    if (raw && raw.length < 500000) {
-      const s = JSON.parse(raw);
-      if (
-        s.schema === 1 &&
-        typeof s.id === "string" &&
-        s.expires > now &&
-        Array.isArray(s.subscribers) &&
-        s.subscribers.length <= MAX_SUBSCRIBERS &&
-        Array.isArray(s.profiles) &&
-        Array.isArray(s.events) &&
-        Array.isArray(s.jobs) &&
-        Array.isArray(s.completed)
-      )
-        return s;
+    if (raw && raw.length < 1000000) {
+      const s = unpack(JSON.parse(raw));
+      if (s.expires > now) return s;
     }
   } catch {
     /* A corrupt or unavailable browser store creates a fresh, in-memory workspace. */
   }
   const s = seed(now);
   try {
-    storage.setItem(STORAGE_KEY, JSON.stringify(s));
+    storage.setItem(STORAGE_KEY, JSON.stringify(pack(s)));
   } catch {
     /* In-memory fallback is explicit in the UI. */
   }
@@ -726,6 +1086,6 @@ export function lookup(
       m.port === port &&
       m.protocol === protocol &&
       Date.parse(m.started) <= at &&
-      (!m.ended || Date.parse(m.ended) >= at),
+      (!m.ended || Date.parse(m.ended) > at),
   );
 }

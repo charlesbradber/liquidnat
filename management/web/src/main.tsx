@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useMemo } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Activity,
@@ -66,8 +66,15 @@ import {
   Subscriber,
   tick,
   Workspace,
+  AddressMode,
+  addressModeLabel,
+  matchesSubscriber,
+  querySubscribers,
+  subscriberIp,
+  pack,
 } from "./simulator";
 import "./style.css";
+import "./search-addressing.css";
 import { HttpDemoBackend } from "./backend";
 
 type Area =
@@ -86,6 +93,7 @@ type Modal = {
     | "create"
     | "profile"
     | "subscriber"
+    | "addressing"
     | "tour"
     | "reset"
     | "settings"
@@ -189,10 +197,23 @@ export function App() {
     }, 3000);
     return () => clearInterval(timer);
   }, [backendReady]);
-  const [state, setState] = useState<Workspace>(() => load(sessionStorage));
+  const [state, setState] = useState<Workspace>(() => {
+    try {
+      return load(sessionStorage);
+    } catch {
+      return seed();
+    }
+  });
   const [area, setArea] = useState<Area>("overview");
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
+  const [modeFilter, setModeFilter] = useState("all");
+  const [globalQuery, setGlobalQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchIndex, setSearchIndex] = useState(-1);
+  const searchRef = useRef<HTMLFormElement>(null);
+  const [addressChoice, setAddressChoice] = useState<AddressMode>("cgnat");
+  const [staticInput, setStaticInput] = useState("");
   const [page, setPage] = useState(0);
   const [modal, setModal] = useState<Modal | null>(null);
   const [toast, setToast] = useState("");
@@ -226,11 +247,18 @@ export function App() {
   useEffect(() => {
     try {
       if (!remote.current)
-        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(pack(state)));
     } catch {
       setStorageAvailable(false);
     }
   }, [state]);
+  useEffect(() => {
+    const close = (e: PointerEvent) => {
+      if (!searchRef.current?.contains(e.target as Node)) setSearchOpen(false);
+    };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, []);
   useEffect(() => {
     const interval = setInterval(() => {
       const now = Date.now();
@@ -246,7 +274,7 @@ export function App() {
   }, [toast]);
   useEffect(() => {
     setPage(0);
-  }, [query, filter]);
+  }, [query, filter, modeFilter]);
   useEffect(() => {
     if (!modal) return;
     previousFocus.current = document.activeElement as HTMLElement;
@@ -281,6 +309,7 @@ export function App() {
     setMobile(false);
     setQuery("");
     setFilter("all");
+    setModeFilter("all");
     setPage(0);
     setTab(target === "network" ? "interfaces" : "");
   };
@@ -331,19 +360,46 @@ export function App() {
   };
   const profile = (sub: Subscriber) =>
     state.profiles.find((p) => p.id === sub.profile)!;
-  const online = state.subscribers.filter((s) => s.status === "online").length;
-  const issues = state.subscribers.filter(
-    (s) => !["online", "suspended"].includes(s.status),
+  const online = useMemo(
+    () => state.subscribers.filter((s) => s.status === "online").length,
+    [state],
   );
-  const visible = state.subscribers.filter(
-    (s) =>
-      (filter === "all" ||
-        (filter === "issues"
-          ? !["online", "suspended"].includes(s.status)
-          : s.status === filter)) &&
-      [s.name, s.username, s.circuit, s.ip, s.ipv6, s.id].some((x) =>
-        x.toLowerCase().includes(query.toLowerCase()),
+  const issues = useMemo(
+    () =>
+      state.subscribers.filter(
+        (s) => !["online", "suspended"].includes(s.status),
       ),
+    [state],
+  );
+  const visible = useMemo(
+    () =>
+      state.subscribers.filter(
+        (s) =>
+          (filter === "all" ||
+            (filter === "issues"
+              ? !["online", "suspended"].includes(s.status)
+              : s.status === filter)) &&
+          matchesSubscriber(s, query) &&
+          (modeFilter === "all" || s.addressMode === modeFilter),
+      ),
+    [state, query, filter, modeFilter],
+  );
+  const globalMatches = useMemo(
+    () =>
+      globalQuery.trim()
+        ? querySubscribers(state, globalQuery, 0, 6)
+        : { items: [], total: 0 },
+    [state, globalQuery],
+  );
+  const addressCounts = useMemo(
+    () => ({
+      cgnat: state.subscribers.filter((s) => s.addressMode === "cgnat").length,
+      direct: state.subscribers.filter((s) => s.addressMode === "direct")
+        .length,
+      static: state.subscribers.filter((s) => s.addressMode === "static")
+        .length,
+    }),
+    [state],
   );
   const shown = visible.slice(page * 10, page * 10 + 10);
   const running = state.jobs.find((j) => j.status === "running");
@@ -380,6 +436,21 @@ export function App() {
     setProfileChoice(sub.profile);
     setModal({ kind: "profile", title: "Change service profile", sub });
   }
+  function showAddressing(sub: Subscriber) {
+    setAddressChoice(sub.addressMode);
+    setStaticInput(
+      sub.addressMode === "static"
+        ? sub.ip
+        : subscriberIp(Number(sub.id.slice(4)) - 1, "static"),
+    );
+    setFormError("");
+    setModal({ kind: "addressing", title: "Change IPv4 addressing", sub });
+  }
+  function searchAll() {
+    go("subscribers");
+    setQuery(globalQuery.trim());
+    setSearchOpen(false);
+  }
   function diagnostic(sub: Subscriber) {
     setSelectedDiagnostic(sub.id);
     go("diagnostics");
@@ -405,7 +476,9 @@ export function App() {
   const chosen =
     state.subscribers.find((s) => s.id === selectedDiagnostic) ||
     state.subscribers[0];
-  const throughput = 6.42 + (paused ? 0 : Math.sin(clock / 23000) * 0.24);
+  const chartClock = useRef(clock);
+  if (!paused) chartClock.current = clock;
+  const throughput = 86.42 + Math.sin(chartClock.current / 23000) * 3.24;
   const minutes = Math.max(0, Math.ceil((state.expires - clock) / 60000));
 
   function TrafficChart() {
@@ -448,7 +521,7 @@ export function App() {
               strokeDasharray="3 4"
             />
             <text x="3" y={24 + i * 38}>
-              {8 - i * 2}G
+              {120 - i * 30}G
             </text>
           </g>
         ))}
@@ -524,7 +597,7 @@ export function App() {
             <tr>
               <th>Subscriber</th>
               <th>Status</th>
-              <th>IP address</th>
+              <th>IPv4 / mode</th>
               <th>Service profile</th>
               {!compact && <th>Circuit / VLAN</th>}
               <th aria-label="Actions" />
@@ -562,7 +635,10 @@ export function App() {
                     {statusLabel[s.status]}
                   </Badge>
                 </td>
-                <td className="mono">{s.ip}</td>
+                <td className="mono">
+                  {s.ip}
+                  <small>{addressModeLabel[s.addressMode]}</small>
+                </td>
                 <td>
                   {profile(s).name}
                   <small>
@@ -646,7 +722,7 @@ export function App() {
               <Icon icon={n.icon} />
               <span>{n.label}</span>
               {n.id === "subscribers" && (
-                <small>{state.subscribers.length}</small>
+                <small>{state.subscribers.length.toLocaleString()}</small>
               )}
             </button>
           ))}
@@ -716,6 +792,129 @@ export function App() {
             <ChevronRight size={13} />
             <strong>{nav.find((n) => n.id === area)?.label}</strong>
           </div>
+          <form
+            className="global-search"
+            ref={searchRef}
+            role="search"
+            onSubmit={(e) => {
+              e.preventDefault();
+              searchAll();
+            }}
+          >
+            <Search size={17} />
+            <input
+              role="combobox"
+              aria-label="Search all subscribers"
+              aria-expanded={searchOpen && !!globalQuery.trim()}
+              aria-controls="global-search-results"
+              aria-autocomplete="list"
+              aria-activedescendant={
+                searchIndex >= 0 ? `global-result-${searchIndex}` : undefined
+              }
+              placeholder="Search name, RADIUS, IPv4, IPv6, MAC…"
+              value={globalQuery}
+              autoComplete="off"
+              onFocus={() => setSearchOpen(true)}
+              onChange={(e) => {
+                setGlobalQuery(e.target.value);
+                setSearchOpen(true);
+                setSearchIndex(-1);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setSearchOpen(false);
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  setSearchOpen(true);
+                  setSearchIndex((i) =>
+                    Math.min(i + 1, globalMatches.items.length - 1),
+                  );
+                }
+                if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setSearchIndex((i) => Math.max(-1, i - 1));
+                }
+                if (
+                  e.key === "Enter" &&
+                  searchOpen &&
+                  searchIndex >= 0 &&
+                  globalMatches.items[searchIndex]
+                ) {
+                  e.preventDefault();
+                  inspect(globalMatches.items[searchIndex]);
+                  setSearchOpen(false);
+                }
+              }}
+            />
+            {globalQuery && (
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Clear global search"
+                onClick={() => {
+                  setGlobalQuery("");
+                  setSearchIndex(-1);
+                }}
+              >
+                <X size={14} />
+              </button>
+            )}
+            {searchOpen && globalQuery.trim() && (
+              <div className="global-search-popover">
+                <div className="global-search-summary">
+                  {globalMatches.total.toLocaleString()} matching subscribers{" "}
+                  <small>
+                    Search across all{" "}
+                    {state.subscribers.length.toLocaleString()} services
+                  </small>
+                </div>
+                <div
+                  id="global-search-results"
+                  role="listbox"
+                  aria-label="Subscriber search results"
+                >
+                  {globalMatches.items.map((sub, index) => (
+                    <button
+                      id={`global-result-${index}`}
+                      role="option"
+                      aria-selected={searchIndex === index}
+                      type="button"
+                      key={sub.id}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        inspect(sub);
+                        setSearchOpen(false);
+                      }}
+                    >
+                      <span className="avatar">{initials(sub.name)}</span>
+                      <span className="search-result-copy">
+                        <strong>
+                          {sub.name}{" "}
+                          <span>{addressModeLabel[sub.addressMode]}</span>
+                        </strong>
+                        <small>{sub.username}</small>
+                        <small className="mono">
+                          {sub.ip} · {sub.mac}
+                        </small>
+                      </span>
+                      <ChevronRight size={15} />
+                    </button>
+                  ))}
+                  {!globalMatches.total && (
+                    <div className="search-no-results">
+                      No matches. Try a RADIUS username, name, IP address,
+                      prefix, circuit, or MAC.
+                    </div>
+                  )}
+                </div>
+                {globalMatches.total > 0 && (
+                  <button type="submit" className="search-view-all">
+                    View all {globalMatches.total.toLocaleString()} matches{" "}
+                    <ArrowRight size={14} />
+                  </button>
+                )}
+              </div>
+            )}
+          </form>
           <div className="topbar-actions">
             <span className="system-status">
               <i /> All demo systems operational
@@ -1160,7 +1359,7 @@ export function App() {
                   <div className="search-field">
                     <Search size={17} />
                     <input
-                      placeholder="Search name, username, circuit, or IP…"
+                      placeholder="Search name, RADIUS username, IP, or MAC…"
                       aria-label="Search subscribers"
                       value={query}
                       onChange={(e) => setQuery(e.target.value)}
@@ -1177,6 +1376,16 @@ export function App() {
                   </div>
                   <div className="inline-controls">
                     <ListFilter size={16} />
+                    <select
+                      aria-label="Filter IPv4 mode"
+                      value={modeFilter}
+                      onChange={(e) => setModeFilter(e.target.value)}
+                    >
+                      <option value="all">All IPv4 modes</option>
+                      <option value="cgnat">CGNAT</option>
+                      <option value="direct">Direct IPv4</option>
+                      <option value="static">Static IPv4</option>
+                    </select>
                     <select
                       aria-label="Filter subscriber status"
                       value={filter}
@@ -1196,7 +1405,8 @@ export function App() {
                         )
                       }
                     >
-                      <Download size={14} /> Export
+                      <Download size={14} />{" "}
+                      {visible.length > 250 ? "Export first 250" : "Export"}
                     </button>
                   </div>
                 </div>
@@ -1264,7 +1474,7 @@ export function App() {
                       </li>
                       <li>
                         <Check size={15} />
-                        Shared IPv4 via CGNAT
+                        CGNAT, direct or static IPv4
                       </li>
                       <li>
                         <Check size={15} />
@@ -1560,7 +1770,7 @@ export function App() {
                         ["::/0", "2001:db8:ffff::1", "Static", "upstream0"],
                         ["100.64.0.0/24", "Direct", "Connected", "access0.200"],
                         [
-                          "2001:db8:100::/48",
+                          "2001:db8::/32",
                           "Direct",
                           "Subscriber",
                           "access0.200",
@@ -1602,7 +1812,7 @@ export function App() {
                       </div>
                       <div>
                         <dt>IPv6 delegated aggregate</dt>
-                        <dd className="mono">2001:db8:100::/48</dd>
+                        <dd className="mono">2001:db8::/32</dd>
                       </div>
                       <div>
                         <dt>CGNAT public pool</dt>
@@ -1651,6 +1861,34 @@ export function App() {
 
           {area === "cgnat" && (
             <>
+              <div className="metrics-grid three">
+                <Metric
+                  label="CGNAT subscribers"
+                  value={addressCounts.cgnat.toLocaleString()}
+                  icon={GitBranch}
+                  footer="Shared IPv4 · searchable fictional mappings"
+                />
+                <Metric
+                  label="Direct IPv4 subscribers"
+                  value={addressCounts.direct.toLocaleString()}
+                  icon={Globe2}
+                  footer="Routed IPv4 · no NAT translation"
+                />
+                <Metric
+                  label="Static IPv4 subscribers"
+                  value={addressCounts.static.toLocaleString()}
+                  icon={LockKeyhole}
+                  footer="Reserved IPv4 · no NAT translation"
+                />
+              </div>
+              <div className="notice">
+                <Users size={17} />
+                Choose any subscriber to inspect CGNAT mappings or change their
+                IPv4 mode.
+                <button className="text-link" onClick={() => go("subscribers")}>
+                  Browse subscribers <ArrowRight size={13} />
+                </button>
+              </div>
               <div className="two-columns">
                 <section className="panel pool-panel">
                   <div className="panel-heading">
@@ -1659,9 +1897,13 @@ export function App() {
                       <p>203.0.113.8/29 · documentation addresses</p>
                     </div>
                     <Badge
-                      tone={state.poolCapacity === 128 ? "amber" : "green"}
+                      tone={
+                        state.poolUsed >= state.poolCapacity ? "amber" : "green"
+                      }
                     >
-                      {state.poolCapacity === 128 ? "At capacity" : "Available"}
+                      {state.poolUsed >= state.poolCapacity
+                        ? "At capacity"
+                        : "Available"}
                     </Badge>
                   </div>
                   <div className="pool-number">
@@ -1672,7 +1914,7 @@ export function App() {
                     </strong>
                   </div>
                   <div
-                    className={`progress-track ${state.poolCapacity === 128 ? "orange" : ""}`}
+                    className={`progress-track ${state.poolUsed >= state.poolCapacity ? "orange" : ""}`}
                   >
                     <i
                       style={{
@@ -1686,13 +1928,16 @@ export function App() {
                   </p>
                   <button
                     className="button secondary"
-                    disabled={state.poolCapacity >= 256}
+                    disabled={state.poolExpanded}
                     onClick={() =>
                       preview(
                         { type: "expand-pool" },
                         "Expand demo pool capacity",
                         [
-                          ["Capacity", "128 → 256 admission slots"],
+                          [
+                            "Capacity",
+                            `${state.poolCapacity.toLocaleString()} → 16,384 admission slots`,
+                          ],
                           ["Existing mappings", "Retained"],
                           [
                             "Affected subscriber",
@@ -1704,7 +1949,7 @@ export function App() {
                     }
                   >
                     <Plus size={15} />
-                    {state.poolCapacity >= 256
+                    {state.poolExpanded
                       ? "Pool expanded"
                       : "Review capacity increase"}
                   </button>
@@ -2064,7 +2309,8 @@ export function App() {
                         DownloadJson(state.events, "liquidnat-demo-events.json")
                       }
                     >
-                      <Download size={14} /> Export
+                      <Download size={14} />{" "}
+                      {visible.length > 250 ? "Export first 250" : "Export"}
                     </button>
                   </div>
                   <EventList events={state.events} />
@@ -2087,7 +2333,11 @@ export function App() {
                 >
                   {[
                     ...state.subscribers.filter((s) => s.status !== "online"),
-                    ...state.subscribers.filter((s) => s.status === "online"),
+                    ...state.subscribers.filter(
+                      (s, index) =>
+                        s.status === "online" &&
+                        (s.id === chosen.id || index < 30),
+                    ),
                   ].map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.name} · {s.circuit}
@@ -2517,7 +2767,8 @@ export function App() {
                           .name,
                       ],
                       ["Authentication", "Simulated Access-Accept"],
-                      ["Network", "Documentation-only dual-stack session"],
+                      ["Network", "Reserved lab dual-stack session"],
+                      ["IPv4 mode", "Direct IPv4 · no CGNAT"],
                     ],
                   );
                 }}
@@ -2652,6 +2903,140 @@ export function App() {
                 </div>
               </>
             )}
+            {modal.kind === "addressing" && modal.sub && (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const sub = modal.sub!;
+                  preview(
+                    {
+                      type: "addressing",
+                      id: sub.id,
+                      mode: addressChoice,
+                      ...(addressChoice === "static"
+                        ? { staticIp: staticInput }
+                        : {}),
+                    },
+                    "Review IPv4 addressing change",
+                    [
+                      ["Subscriber", sub.name],
+                      [
+                        "Mode",
+                        `${addressModeLabel[sub.addressMode]} → ${addressModeLabel[addressChoice]}`,
+                      ],
+                      [
+                        "IPv4",
+                        `${sub.ip} → ${addressChoice === "static" ? staticInput : subscriberIp(Number(sub.id.slice(4)) - 1, addressChoice)}`,
+                      ],
+                      [
+                        "CGNAT",
+                        addressChoice === "cgnat"
+                          ? "New simulated mapping allocated"
+                          : "Bypassed · old NAT mappings closed",
+                      ],
+                      [
+                        "Session impact",
+                        "Simulated IPv4 reconnect; old IPv4 flows end",
+                      ],
+                      ["IPv6", "WAN address and delegated prefix retained"],
+                    ],
+                  );
+                }}
+              >
+                <p className="modal-description">
+                  Choose how {modal.sub.name} reaches the IPv4 internet. Direct
+                  and static services bypass CGNAT.
+                </p>
+                <div className="address-mode-options">
+                  {(["cgnat", "direct", "static"] as AddressMode[]).map(
+                    (mode) => (
+                      <label
+                        className={addressChoice === mode ? "selected" : ""}
+                        key={mode}
+                      >
+                        <input
+                          type="radio"
+                          name="address-mode"
+                          value={mode}
+                          checked={addressChoice === mode}
+                          onChange={() => setAddressChoice(mode)}
+                        />
+                        <span>
+                          <strong>{addressModeLabel[mode]}</strong>
+                          <small>
+                            {mode === "cgnat"
+                              ? "Shared address · subscriber NAT attribution"
+                              : mode === "direct"
+                                ? "Automatic routed IPv4 · no translation"
+                                : "Reserved routed IPv4 · enter a specific address"}
+                          </small>
+                        </span>
+                      </label>
+                    ),
+                  )}
+                </div>
+                {addressChoice === "static" && (
+                  <label className="static-ip-field">
+                    Static IPv4 address
+                    <input
+                      aria-label="Static IPv4 address"
+                      required
+                      placeholder="198.18.0.11"
+                      value={staticInput}
+                      onChange={(e) => setStaticInput(e.target.value)}
+                      maxLength={32}
+                    />
+                    <small>
+                      Reserved lab ranges only. Address ownership is checked
+                      before apply.
+                    </small>
+                  </label>
+                )}
+                <div className="callout">
+                  <Globe2 size={17} />
+                  <p>
+                    Direct services use reserved benchmark addresses
+                    (198.18.0.0/15), not real publicly routed IPs. Switching
+                    mode ends existing simulated IPv4 flows; IPv6 stays
+                    assigned.
+                  </p>
+                </div>
+                {addressChoice === "cgnat" &&
+                  modal.sub.addressMode !== "cgnat" &&
+                  state.poolUsed >= state.poolCapacity && (
+                    <div className="notice">
+                      The CGNAT pool is full.{" "}
+                      <button
+                        type="button"
+                        className="text-link"
+                        onClick={() => {
+                          setModal(null);
+                          go("cgnat");
+                        }}
+                      >
+                        Expand capacity first <ArrowRight size={13} />
+                      </button>
+                    </div>
+                  )}
+                {formError && (
+                  <p className="error-text" role="alert">
+                    {formError}
+                  </p>
+                )}
+                <div className="modal-actions">
+                  <button
+                    className="button secondary"
+                    type="button"
+                    onClick={() => setModal(null)}
+                  >
+                    Cancel
+                  </button>
+                  <button className="button primary">
+                    Review addressing change <ArrowRight size={14} />
+                  </button>
+                </div>
+              </form>
+            )}
             {modal.kind === "preview" && (
               <>
                 <div className="change-status">
@@ -2727,6 +3112,21 @@ export function App() {
                     </dd>
                   </div>
                   <div>
+                    <dt>IPv4 mode</dt>
+                    <dd>
+                      {addressModeLabel[modal.sub.addressMode]}
+                      {modal.sub.addressMode !== "cgnat" && " · NAT bypass"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>MAC address</dt>
+                    <dd className="mono">{modal.sub.mac}</dd>
+                  </div>
+                  <div>
+                    <dt>IPv6 WAN address</dt>
+                    <dd className="mono">{modal.sub.ipv6Address}</dd>
+                  </div>
+                  <div>
                     <dt>IPv4 address</dt>
                     <dd className="mono">{modal.sub.ip}</dd>
                   </div>
@@ -2752,6 +3152,41 @@ export function App() {
                   </div>
                 </dl>
                 <div className="modal-actions wrap">
+                  <button
+                    className="button secondary"
+                    onClick={() => showAddressing(modal.sub!)}
+                  >
+                    <Globe2 size={15} />
+                    Change IPv4 mode
+                  </button>
+                  {modal.sub.addressMode === "cgnat" && (
+                    <button
+                      className="button secondary"
+                      onClick={() => {
+                        const mappings = state.mappings.filter(
+                          (m) => m.subscriber === modal.sub!.id && !m.ended,
+                        );
+                        const mapping = mappings[0];
+                        go("cgnat");
+                        setModal(null);
+                        if (mapping) {
+                          setMapIp(mapping.publicIp);
+                          setMapPort(String(mapping.port));
+                          setMapProtocol(mapping.protocol);
+                          setMapAt(new Date().toISOString().slice(0, 16));
+                          setMappingResults(mappings);
+                        } else {
+                          setMappingResults([]);
+                          notify(
+                            "No active demo NAT mappings for this subscriber.",
+                          );
+                        }
+                      }}
+                    >
+                      <GitBranch size={15} />
+                      View NAT mappings
+                    </button>
+                  )}
                   <button
                     className="button secondary"
                     onClick={() => diagnostic(modal.sub!)}

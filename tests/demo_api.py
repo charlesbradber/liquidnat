@@ -45,18 +45,29 @@ def main():
             assert request(a,'/actions',action,{**headers,'Origin':'https://untrusted.example'})[0]==403
             code,changed=request(a,'/actions',action,headers);assert code==200,changed
             assert changed['revision']==2
-            assert changed['workspace']['subscribers'][125]['status']=='online'
+            assert next(sub for sub in changed['workspace']['subscriberChanges'] if sub['id']=='sub-0126')['status']=='online'
             code,replayed=request(a,'/actions',action,headers);assert code==200 and replayed==changed
             assert request(a,'/actions',{'type':'suspend','id':'sub-0001'},headers)[0]==409
-            _,other=request(b);assert other['workspace']['subscribers'][125]['status']=='auth-rejected'
+            _,other=request(b);assert other['workspace']['subscriberChanges']==[]
             assert request(a,'/actions',{'type':'backup'},{**headers,'Idempotency-Key':'test-stale-rev'})[0]==409
             code,page=request(a,'/subscribers?q=Jordan&limit=10000');assert code==200 and page['limit']==50 and page['total']==1
             code,bad=request(a,'/actions',{'type':'exec','command':'arbitrary'},{**headers,'If-Match':'2','Idempotency-Key':'test-command'});assert code==422 and bad['error']['code']=='VALIDATION'
             code,bad=request(a,'/actions',{'type':'suspend','id':'other-workspace-id'},{**headers,'If-Match':'2','Idempotency-Key':'test-object'});assert code==422
             code,reset=request(a,'/reset',{}, {**headers,'If-Match':'2','Idempotency-Key':'test-reset'});assert code==200
             assert reset['workspace']['id']!=sa['workspace']['id']
-            assert reset['workspace']['subscribers'][125]['status']=='auth-rejected'
+            assert reset['workspace']['subscriberChanges']==[]
             _,other=request(b);assert other['workspace']['id']==sb['workspace']['id']
+            assert sa['workspace']['compact'] is True and len(json.dumps(sa))<20000
+            code,large_page=request(a,'/subscribers?limit=50');assert code==200 and len(large_page['items'])==50 and large_page['total']==12864
+            code,page=request(a,'/subscribers?offset=12000&limit=10');assert code==200 and page['total']==12864 and len(page['items'])==10
+            sample=page['items'][0]
+            for field in ['username','ip','ipv6','ipv6Address','mac']:
+                from urllib.parse import quote
+                code,found=request(a,'/subscribers?q='+quote(sample[field]));assert code==200 and any(sub['id']==sample['id'] for sub in found['items']),(field,found)
+            code,static=request(a,'/actions',{'type':'addressing','id':'sub-0001','mode':'static','staticIp':'192.0.2.50'}, {**headers,'If-Match':'1','Idempotency-Key':'test-static-ip'});assert code==200,static
+            assert next(sub for sub in static['workspace']['subscriberChanges'] if sub['id']=='sub-0001')['addressMode']=='static'
+            code,duplicate=request(a,'/actions',{'type':'addressing','id':'sub-0002','mode':'static','staticIp':'192.0.2.50'}, {**headers,'If-Match':'2','Idempotency-Key':'test-duplicate-ip'});assert code==422 and duplicate['error']['code']=='ADDRESS_IN_USE'
+            code,found=request(a,'/subscribers?q=192.0.2.50');assert code==200 and found['total']==1
             # Invalid requests count toward the per-session budget too.
             statuses=[request(a,'/actions',{'type':'backup'})[0] for _ in range(65)]
             assert 429 in statuses,'Rejected mutations bypassed the request rate budget'

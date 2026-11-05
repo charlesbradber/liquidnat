@@ -14,9 +14,193 @@ import {
   STORAGE_KEY,
   tick,
   TTL,
+  pack,
+  unpack,
+  querySubscribers,
+  matchesSubscriber,
+  subscriberIp,
+  validateStaticIp,
 } from "./simulator";
 const now = 1793880000000;
 describe("Isolated demo backend", () => {
+  it("retains a reserved static address after authentication recovery and can bypass a blocked NAT admission", () => {
+    let s = seed(now);
+    s = apply(
+      s,
+      {
+        type: "addressing",
+        id: "sub-0126",
+        mode: "static",
+        staticIp: "192.0.2.70",
+      },
+      s.revision,
+      now,
+    );
+    s = apply(s, { type: "fix-auth", id: "sub-0126" }, s.revision, now + 1);
+    expect(s.subscribers.find((sub) => sub.id === "sub-0126")?.ip).toBe(
+      "192.0.2.70",
+    );
+    s = apply(
+      s,
+      { type: "addressing", id: "sub-0128", mode: "direct" },
+      s.revision,
+      now + 2,
+    );
+    expect(s.subscribers.find((sub) => sub.id === "sub-0128")?.status).toBe(
+      "online",
+    );
+  });
+  it("generates 12,864 unique IP, MAC and IPv6 assignments across all addressing modes", () => {
+    const s = seed(now);
+    expect(s.subscribers).toHaveLength(12864);
+    for (const field of [
+      "id",
+      "username",
+      "mac",
+      "ipv6",
+      "ipv6Address",
+    ] as const)
+      expect(new Set(s.subscribers.map((sub) => sub[field])).size).toBe(12864);
+    const assigned = s.subscribers.filter((sub) => sub.ip !== "—");
+    expect(new Set(assigned.map((sub) => sub.ip)).size).toBe(assigned.length);
+    expect(new Set(s.subscribers.map((sub) => sub.addressMode)).size).toBe(3);
+    expect(s.mappings.length).toBeGreaterThan(8000);
+  });
+  it("searches names, RADIUS usernames, IPv4, IPv6, prefixes and MAC formats with bounded pages", () => {
+    const s = seed(now),
+      sub = s.subscribers[12000];
+    for (const q of [
+      sub.username.toUpperCase(),
+      sub.ip,
+      sub.ipv6,
+      sub.ipv6Address,
+      sub.mac,
+      sub.mac.replaceAll(":", "-"),
+      sub.mac.replaceAll(":", ""),
+    ])
+      expect(querySubscribers(s, q).items.some((x) => x.id === sub.id)).toBe(
+        true,
+      );
+    expect(matchesSubscriber(s.subscribers[0], "Alex Bennett")).toBe(true);
+    expect(
+      querySubscribers(s, "", 12850, 1000).items.length,
+    ).toBeLessThanOrEqual(50);
+    expect(
+      querySubscribers(s, "", 0, 10, "all", "static").items.every(
+        (x) => x.addressMode === "static",
+      ),
+    ).toBe(true);
+    expect(querySubscribers(s, "not-a-real-subscriber").total).toBe(0);
+  });
+  it("switches CGNAT to static/direct and back, preserves IPv6 and closes historical mappings without mutating prior state", () => {
+    let s = seed(now);
+    const original = s;
+    const sub = s.subscribers[0];
+    s = apply(
+      s,
+      {
+        type: "addressing",
+        id: sub.id,
+        mode: "static",
+        staticIp: "192.0.2.50",
+      },
+      s.revision,
+      now,
+    );
+    expect(s.subscribers[0].ip).toBe("192.0.2.50");
+    expect(s.subscribers[0].ipv6).toBe(sub.ipv6);
+    expect(s.poolUsed).toBe(original.poolUsed - 1);
+    expect(original.mappings[0].ended).toBeNull();
+    expect(original.subscribers[0].addressMode).toBe("cgnat");
+    expect(lookup(s, "203.0.113.10", 40012, "TCP", now - 1)).toHaveLength(1);
+    expect(lookup(s, "203.0.113.10", 40012, "TCP", now)).toHaveLength(0);
+    s = apply(
+      s,
+      { type: "addressing", id: sub.id, mode: "direct" },
+      s.revision,
+      now + 1,
+    );
+    expect(s.subscribers[0].ip).toBe(subscriberIp(0, "direct"));
+    s = apply(
+      s,
+      { type: "addressing", id: sub.id, mode: "cgnat" },
+      s.revision,
+      now + 2,
+    );
+    expect(s.subscribers[0].addressMode).toBe("cgnat");
+    expect(s.poolUsed).toBe(original.poolUsed);
+    expect(
+      s.mappings.filter((m) => m.subscriber === sub.id && !m.ended),
+    ).toHaveLength(1);
+    expect(s.events[0].category).toBe("Addressing");
+  });
+  it("rejects duplicate or unsafe static addresses and full-pool admission", () => {
+    const s = seed(now),
+      staticSub = s.subscribers.find((sub) => sub.addressMode === "static")!;
+    expect(() =>
+      apply(
+        s,
+        {
+          type: "addressing",
+          id: "sub-0001",
+          mode: "static",
+          staticIp: staticSub.ip,
+        },
+        1,
+        now,
+      ),
+    ).toThrow(/already assigned/);
+    for (const ip of [
+      "8.8.8.8",
+      "100.64.0.5",
+      "198.18.0.256",
+      "198.18.0.0",
+      "198.18.0.255",
+      "::1",
+    ])
+      expect(() => validateStaticIp(ip)).toThrow();
+    const direct = s.subscribers.find((sub) => sub.addressMode === "direct")!;
+    expect(() =>
+      apply(s, { type: "addressing", id: direct.id, mode: "cgnat" }, 1, now),
+    ).toThrow(/pool is full/);
+    expect(() =>
+      parseAction({ type: "addressing", id: direct.id, mode: "passthrough" }),
+    ).toThrow();
+  });
+  it("persists large workspaces as compact deltas and restores changes and historical mappings exactly", () => {
+    let s = seed(now, "compact");
+    expect(JSON.stringify(pack(s)).length).toBeLessThan(10000);
+    s = apply(
+      s,
+      {
+        type: "addressing",
+        id: "sub-0001",
+        mode: "static",
+        staticIp: "192.0.2.60",
+      },
+      1,
+      now + 1,
+    );
+    s = apply(
+      s,
+      {
+        type: "create",
+        name: "Demo Test",
+        username: "new.test@example.net",
+        profile: "home500",
+      },
+      s.revision,
+      now + 2,
+    );
+    s = apply(s, { type: "failover" }, s.revision, now + 3);
+    s = tick(s, now + 7000);
+    const packed = pack(s);
+    expect(packed.subscriberChanges).toHaveLength(2);
+    expect(JSON.stringify(packed).length).toBeLessThan(15000);
+    const restored = unpack(JSON.parse(JSON.stringify(packed)));
+    expect(restored).toEqual(s);
+    expect(restored.subscribers).toHaveLength(12865);
+  });
   it("reproduces fixtures without sharing mutations", () => {
     const a = seed(now, "a"),
       b = seed(now, "b");
@@ -199,7 +383,7 @@ describe("Isolated demo backend", () => {
     };
     store.setItem(STORAGE_KEY, "{corrupt");
     const a = load(store, now);
-    expect(a.subscribers).toHaveLength(128);
+    expect(a.subscribers).toHaveLength(12864);
     const b = load(store, now + TTL + 1);
     expect(b.id).not.toBe(a.id);
     const fail = {
@@ -211,7 +395,7 @@ describe("Isolated demo backend", () => {
       },
       removeItem: () => {},
     };
-    expect(load(fail, now).subscribers).toHaveLength(128);
+    expect(load(fail, now).subscribers).toHaveLength(12864);
   });
   it("rejects arbitrary backend operations and validates action fields", () => {
     for (const a of [

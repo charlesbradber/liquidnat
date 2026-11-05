@@ -14,6 +14,65 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 describe("Manager interactions", () => {
+  it("finds a subscriber using the top search and switches CGNAT to a static IPv4", () => {
+    render(<App />);
+    const search = screen.getByRole("combobox", {
+      name: "Search all subscribers",
+    });
+    fireEvent.change(search, {
+      target: { value: "subscriber001@example.net" },
+    });
+    expect(
+      within(
+        screen.getByRole("listbox", { name: "Subscriber search results" }),
+      ).getAllByRole("option"),
+    ).toHaveLength(1);
+    fireEvent.keyDown(search, { key: "ArrowDown" });
+    fireEvent.keyDown(search, { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Change IPv4 mode" }));
+    fireEvent.click(screen.getByRole("radio", { name: /Static IPv4/ }));
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Static IPv4 address" }),
+      { target: { value: "192.0.2.50" } },
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: /Review addressing change/ }),
+    );
+    expect(screen.getByText("CGNAT → Static IPv4")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Apply demo change" }));
+    fireEvent.change(search, { target: { value: "192.0.2.50" } });
+    fireEvent.click(
+      within(
+        screen.getByRole("listbox", { name: "Subscriber search results" }),
+      ).getByRole("option"),
+    );
+    expect(screen.getByText("Static IPv4 · NAT bypass")).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: "View NAT mappings" }),
+    ).toBeNull();
+  });
+  it("bounds top-search suggestions and lists even with 12k subscribers", () => {
+    render(<App />);
+    fireEvent.change(
+      screen.getByRole("combobox", { name: "Search all subscribers" }),
+      { target: { value: "subscriber" } },
+    );
+    expect(
+      within(
+        screen.getByRole("listbox", { name: "Subscriber search results" }),
+      ).getAllByRole("option"),
+    ).toHaveLength(6);
+    fireEvent.click(
+      screen.getByRole("button", { name: /View all 12,864 matches/ }),
+    );
+    expect(screen.getByText(/of 12864 subscribers/)).toBeTruthy();
+    expect(screen.getAllByRole("row")).toHaveLength(11);
+    fireEvent.change(
+      screen.getByRole("combobox", { name: "Filter IPv4 mode" }),
+      { target: { value: "static" } },
+    );
+    expect(screen.getByText(/of 1286 subscribers/)).toBeTruthy();
+  });
   it("creates a subscriber only after a change preview, then filters and suspends it", () => {
     render(<App />);
     expect(
@@ -90,6 +149,6 @@ describe("Manager interactions", () => {
       screen.getByRole("heading", { name: "Forwarding table" }),
     ).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Addressing" }));
-    expect(screen.getByText("2001:db8:100::/48")).toBeTruthy();
+    expect(screen.getByText("2001:db8::/32")).toBeTruthy();
   });
 });

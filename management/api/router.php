@@ -26,13 +26,16 @@ function fail(int $status, string $code, string $message): never {
 function worker(array $request): array {
     $path=__DIR__.'/var/simulator-worker.mjs';
     if(!is_file($path)) fail(503,'NOT_BUILT','Build the shared simulator worker before starting this API.');
-    $process=proc_open(['/usr/bin/node',$path], [0=>['pipe','r'],1=>['pipe','w'],2=>['pipe','w']],$pipes,__DIR__,['PATH'=>'/usr/bin:/bin']);
+    // The service owner controls this runtime path; no request field influences it.
+    // Hosted runners and Node version managers do not necessarily use /usr/bin/node.
+    $node=getenv('LIQUIDNAT_NODE_BIN')?:'node';
+    $process=proc_open([$node,$path], [0=>['pipe','r'],1=>['pipe','w'],2=>['pipe','w']],$pipes,__DIR__,['PATH'=>getenv('PATH')?:'/usr/bin:/bin']);
     if(!is_resource($process)) fail(503,'WORKER_UNAVAILABLE','Simulator worker could not start.');
     fwrite($pipes[0],json_encode($request,JSON_THROW_ON_ERROR)); fclose($pipes[0]);
     stream_set_timeout($pipes[1],3); $output=stream_get_contents($pipes[1],1000000);$meta=stream_get_meta_data($pipes[1]);fclose($pipes[1]);
     if($meta['timed_out']){proc_terminate($process,9);fclose($pipes[2]);proc_close($process);fail(503,'WORKER_TIMEOUT','Simulator operation timed out.');}
-    stream_get_contents($pipes[2],4096);fclose($pipes[2]);$exit=proc_close($process);
-    if($exit!==0||!is_string($output))fail(503,'WORKER_FAILED','Simulator operation failed.');
+    $diagnostic=stream_get_contents($pipes[2],4096);fclose($pipes[2]);$exit=proc_close($process);
+    if($exit!==0||!is_string($output)){error_log('LiquidNAT simulator worker exit '.(string)$exit.': '.(string)$diagnostic);fail(503,'WORKER_FAILED','Simulator operation failed.');}
     try {return json_decode($output,true,64,JSON_THROW_ON_ERROR);}catch(Throwable){fail(503,'WORKER_FAILED','Invalid simulator response.');}
 }
 try {

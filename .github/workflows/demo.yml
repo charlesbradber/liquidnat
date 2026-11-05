@@ -20,4 +20,5 @@ jobs:
         working-directory: management/web
       - run: npm run build && npm run build:api
         working-directory: management/web
-      - run: python3 tests/demo_api.py
+      - name: Verify HTTP adapter using the selected Node runtime
+        run: LIQUIDNAT_NODE_BIN="$(command -v node)" python3 tests/demo_api.py

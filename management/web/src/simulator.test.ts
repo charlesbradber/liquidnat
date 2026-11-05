@@ -270,7 +270,7 @@ describe("Isolated demo backend", () => {
       {
         type: "create",
         name: "Demo Test",
-        username: "new.test@example.net",
+        username: "new.test@liquidnet.net",
         profile: "home500",
       },
       s.revision,
@@ -302,7 +302,7 @@ describe("Isolated demo backend", () => {
     run({
       type: "create",
       name: "Example Subscriber",
-      username: "new.person@example.net",
+      username: "new.person@liquidnet.net",
       profile: "home500",
     });
     expect(s.subscribers[0].status).toBe("online");
@@ -327,13 +327,13 @@ describe("Isolated demo backend", () => {
     ).toBe(true);
     run({ type: "upgrade" });
     s = tick(s, now + 6001);
-    expect(s.version).toBe("0.2.1-demo");
+    expect(s.version).toBe("0.2.1");
     expect(s.backupAt).not.toBeNull();
     expect(lookup(s, "203.0.113.10", 40012, "TCP", now)).toHaveLength(1);
     run({ type: "mapping-viewed" });
     expect(s.completed).toHaveLength(9);
     run({ type: "rollback" });
-    expect(s.version).toBe("0.2.0-demo");
+    expect(s.version).toBe("0.2.0");
     expect(s.events.length).toBeGreaterThan(9);
   });
   it("rejects stale revisions, expired sessions and unknown targets without mutation", () => {
@@ -353,7 +353,7 @@ describe("Isolated demo backend", () => {
         {
           type: "create",
           name: "<script>",
-          username: "x@example.net",
+          username: "x@liquidnet.net",
           profile: "home500",
         },
         1,
@@ -366,7 +366,7 @@ describe("Isolated demo backend", () => {
         {
           type: "create",
           name: "Example Person",
-          username: "x@real.example",
+          username: "invalid-username",
           profile: "home500",
         },
         1,
@@ -379,7 +379,7 @@ describe("Isolated demo backend", () => {
         {
           type: "create",
           name: "Example Person",
-          username: "subscriber001@example.net",
+          username: "subscriber001@liquidnet.net",
           profile: "home500",
         },
         1,
@@ -404,7 +404,7 @@ describe("Isolated demo backend", () => {
         {
           type: "create",
           name: "Example Person",
-          username: "person@example.net",
+          username: "person@liquidnet.net",
           profile: "home500",
         },
         1,
@@ -454,7 +454,7 @@ describe("Isolated demo backend", () => {
       ),
     ).toThrow();
   });
-  it("resets corrupt or expired session storage and uses an in-memory fallback", () => {
+  it("resets corrupt storage and retains active browser session storage and uses an in-memory fallback", () => {
     const map = new Map<string, string>();
     const store = {
       getItem: (k: string) => map.get(k) || null,
@@ -469,7 +469,7 @@ describe("Isolated demo backend", () => {
     const a = load(store, now);
     expect(a.subscribers).toHaveLength(12864);
     const b = load(store, now + TTL + 1);
-    expect(b.id).not.toBe(a.id);
+    expect(b.id).toBe(a.id);
     const fail = {
       getItem: () => {
         throw Error();
@@ -493,5 +493,180 @@ describe("Isolated demo backend", () => {
     expect(
       parseAction({ type: "backup", callback: "https://example.net" }),
     ).toEqual({ type: "backup" });
+  });
+});
+
+describe("Network providers", () => {
+  it("creates provider-scoped profiles and subscribers, transfers services, and persists links", () => {
+    let s = seed(now);
+    s = apply(
+      s,
+      parseAction({ type: "save-provider", name: "City Fibre" }),
+      s.revision,
+      now,
+    );
+    const provider = s.providers[1].id;
+    s = apply(
+      s,
+      parseAction({
+        type: "save-profile",
+        name: "City 200",
+        provider,
+        down: 200,
+        up: 50,
+        price: 30,
+      }),
+      s.revision,
+      now,
+    );
+    const profile = s.profiles.at(-1)!.id;
+    const before = s;
+    expect(() =>
+      apply(
+        s,
+        {
+          type: "create",
+          name: "Alex Morgan",
+          username: "alex@example.net",
+          profile,
+          provider: "examplenet",
+        },
+        s.revision,
+        now,
+      ),
+    ).toThrow(/belonging/);
+    expect(s).toEqual(before);
+    s = apply(
+      s,
+      parseAction({
+        type: "create",
+        name: "Alex Morgan",
+        username: "alex@example.net",
+        profile,
+        provider,
+      }),
+      s.revision,
+      now,
+    );
+    expect(s.subscribers[0]).toMatchObject({ provider, profile });
+    expect(() =>
+      apply(
+        s,
+        { type: "profile", id: "sub-0001", profile: "home100", provider },
+        s.revision,
+        now,
+      ),
+    ).toThrow(/belonging/);
+    s = apply(
+      s,
+      parseAction({ type: "profile", id: "sub-0001", profile, provider }),
+      s.revision,
+      now,
+    );
+    expect(s.subscribers.find((sub) => sub.id === "sub-0001")).toMatchObject({
+      provider,
+      profile,
+    });
+    const restored = unpack(JSON.parse(JSON.stringify(pack(s))));
+    expect(restored.providers).toEqual(s.providers);
+    expect(restored.profiles).toEqual(s.profiles);
+    expect(restored.subscribers).toEqual(s.subscribers);
+    expect(seed(now).providers).toHaveLength(1);
+    expect(() =>
+      apply(s, { type: "delete-provider", id: provider }, s.revision, now),
+    ).toThrow(/Remove its profiles/);
+    expect(() =>
+      apply(s, { type: "delete-profile", id: profile }, s.revision, now),
+    ).toThrow(/Move assigned/);
+    expect(() =>
+      apply(
+        s,
+        {
+          type: "save-profile",
+          id: profile,
+          name: "City 200",
+          provider: "examplenet",
+          down: 200,
+          up: 50,
+          price: 30,
+        },
+        s.revision,
+        now,
+      ),
+    ).toThrow(/Move assigned/);
+  });
+  it("validates and edits records and deletes unused provider catalogues", () => {
+    let s = seed(now);
+    s = apply(
+      s,
+      { type: "save-provider", name: "City Fibre" },
+      s.revision,
+      now,
+    );
+    const id = s.providers[1].id;
+    expect(() =>
+      apply(s, { type: "save-provider", name: "city fibre" }, s.revision, now),
+    ).toThrow(/already exists/);
+    expect(() =>
+      apply(
+        s,
+        { type: "save-provider", id: "missing", name: "City" },
+        s.revision,
+        now,
+      ),
+    ).toThrow(/not found/);
+    s = apply(
+      s,
+      { type: "save-provider", id, name: "City Network" },
+      s.revision,
+      now,
+    );
+    expect(s.providers[1].name).toBe("City Network");
+    const values = {
+      type: "save-profile" as const,
+      provider: id,
+      name: "Essential 100",
+      down: 100,
+      up: 20,
+      price: 25,
+    };
+    expect(() =>
+      apply(s, { ...values, provider: "missing" }, s.revision, now),
+    ).toThrow(/valid network provider/);
+    expect(() => apply(s, { ...values, down: 0 }, s.revision, now)).toThrow(
+      /speeds/,
+    );
+    expect(() => parseAction({ ...values, down: "100" })).toThrow(
+      /Invalid service/,
+    );
+    s = apply(s, values, s.revision, now);
+    const profileId = s.profiles.at(-1)!.id;
+    expect(() => apply(s, values, s.revision, now)).toThrow(/already exists/);
+    s = apply(s, { ...values, id: profileId, down: 250 }, s.revision, now);
+    expect(s.profiles.at(-1)!.down).toBe(250);
+    s = apply(s, { type: "delete-profile", id: profileId }, s.revision, now);
+    s = apply(s, { type: "delete-provider", id }, s.revision, now);
+    expect(s.providers).toHaveLength(1);
+    expect(() =>
+      apply(s, { type: "delete-provider", id: "examplenet" }, s.revision, now),
+    ).toThrow(/at least one/);
+  });
+  it("migrates existing sessions and rejects stored cross-provider assignments", () => {
+    let s = seed(now);
+    s = apply(s, { type: "suspend", id: "sub-0001" }, s.revision, now);
+    const old = JSON.parse(JSON.stringify(pack(s)));
+    delete old.providers;
+    old.profiles.forEach((p: Record<string, unknown>) => delete p.provider);
+    old.subscriberChanges.forEach(
+      (p: Record<string, unknown>) => delete p.provider,
+    );
+    const migrated = unpack(old);
+    expect(migrated.subscribers[0]).toMatchObject({
+      provider: "examplenet",
+      status: "suspended",
+    });
+    expect(migrated.providers[0].name).toBe("LiquidNet");
+    old.subscriberChanges[0].provider = "missing";
+    expect(() => unpack(old)).toThrow(/Invalid subscriber/);
   });
 });

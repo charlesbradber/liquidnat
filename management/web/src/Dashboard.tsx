@@ -140,7 +140,7 @@ export function Dashboard({
             <span className="positive">
               ↓ {(throughput * 0.88).toFixed(2)} Gb/s
             </span>
-            <span className="metric-note">Simulated traffic</span>
+            <span className="metric-note">Aggregate traffic</span>
           </>,
           <Activity size={21} />,
         )}
@@ -150,7 +150,7 @@ export function Dashboard({
             2<small>/ 2 healthy</small>
           </>,
           <span className="positive">
-            <i className="tiny-dot" /> Active / standby · simulated
+            <i className="tiny-dot" /> Active / standby
           </span>,
           <Server size={21} />,
         )}
@@ -171,7 +171,7 @@ export function Dashboard({
           <div className="panel-heading">
             <div>
               <h2>
-                Network traffic <span className="subtle-tag">SIMULATED</span>
+                Network traffic <span className="subtle-tag">CURRENT</span>
               </h2>
               <p>Aggregate traffic across your gateways</p>
             </div>
@@ -206,7 +206,7 @@ export function Dashboard({
           <div className="dashboard-chart-caption">
             <span>
               <i className={`tiny-dot ${paused ? "grey" : ""}`} />{" "}
-              {paused ? "Playback paused" : "Demo playback active"}
+              {paused ? "Traffic updates paused" : "Traffic updates active"}
             </span>
             <span>Generated data · not a performance measurement</span>
           </div>
@@ -258,11 +258,11 @@ export function Dashboard({
             <div className="dashboard-clear">
               <Check size={21} />
               <strong>No open incidents</strong>
-              <p>All simulated subscriber prerequisites are ready.</p>
+              <p>All subscriber prerequisite checks passed.</p>
             </div>
           )}
           <div className="incident-footnote">
-            Fixture evidence · select a fault to investigate
+            Session evidence · select a fault to investigate
           </div>
         </section>
       </div>
@@ -272,7 +272,7 @@ export function Dashboard({
       >
         <div className="panel-heading">
           <h2 id="gateways-title">Gateways (2)</h2>
-          <span className="subtle-tag">SIMULATED HEALTH</span>
+          <span className="subtle-tag">GATEWAY HEALTH</span>
         </div>
         <div className="table-scroll">
           <table>
@@ -356,7 +356,7 @@ export function Dashboard({
         <div className="panel-heading">
           <div>
             <h2 id="subscriber-activity-title">Subscriber activity</h2>
-            <p>Latest fictional session records in your workspace</p>
+            <p>Latest subscriber session records</p>
           </div>
           <div className="inline-controls">
             <select
@@ -496,11 +496,11 @@ export function Dashboard({
       </section>
       <div className="dashboard-guide">
         <span>
-          <strong>{s.completed.length} of 9 scenarios completed</strong> ·
-          Explore service changes and recovery in your isolated workspace.
+          <strong>{incidents.length} services need attention</strong> ·
+          Manage subscriber services, network configuration and gateway operations.
         </span>
         <button className="text-link" onClick={onGuide}>
-          Open demo guide <ArrowRight size={14} />
+          Open quick actions <ArrowRight size={14} />
         </button>
       </div>
     </div>

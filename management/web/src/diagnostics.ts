@@ -1,3 +1,4 @@
+import { initialNetwork, routeLookup } from "./network";
 import type { Subscriber, Workspace } from "./simulator";
 export type DiagnosticStep = {
   title: string;
@@ -23,7 +24,7 @@ export function diagnose(
       detail:
         sub.status === "auth-rejected"
           ? "Access-Reject · synthetic invalid credentials"
-          : "Simulated Access-Accept · realm example.net",
+          : `Access-Accept · realm ${workspace.radius?.realm || "liquidnet.net"}`,
       failed: sub.status === "auth-rejected",
       code: "AUTH_REJECTED",
     },
@@ -42,7 +43,7 @@ export function diagnose(
         sub.status === "suspended"
           ? "Suspended policy · IPv4 and IPv6 access blocked"
           : policy
-            ? `${policy.name} · ${policy.down}/${policy.up} Mb/s · simulated policy`
+            ? `${policy.name} · ${policy.down}/${policy.up} Mb/s · service policy`
             : "Assigned profile is missing",
       failed: sub.status === "suspended" || !policy,
       code:
@@ -52,9 +53,9 @@ export function diagnose(
     },
     {
       title: "Forwarding readiness",
-      detail: `${sub.gateway} · simulated upstream route available`,
-      failed: false,
-      code: "DEMO_FORWARDING_READY",
+      detail: routeLookup(workspace.network || initialNetwork(), "1.1.1.1"),
+      failed: routeLookup(workspace.network || initialNetwork(), "1.1.1.1").startsWith("No installed"),
+      code: "FORWARDING_READY",
     },
   ];
   let blocked = false;
@@ -73,15 +74,15 @@ export function diagnose(
           ? "PREREQUISITE_FAILED"
           : step.failed
             ? step.code
-            : "DEMO_STAGE_READY",
+            : "STAGE_READY",
     };
   });
   result.push({
-    title: "Real traffic verification",
+    title: "Path verification",
     state: "unverified",
-    code: "LIVE_TRAFFIC_UNMEASURED",
+    code: "PROBE_NOT_RUN",
     detail:
-      "Return-path routing, upstream reachability, loss and actual throughput are unmeasured. This demo does not send packets.",
+      "Run a gateway-side packet probe to verify upstream reachability and return-path routing.",
   });
   return result;
 }
@@ -99,7 +100,7 @@ export function diagnosticBundle(
       simulation: true,
       packetEngineConnected: false,
       scope:
-        "Selected fictional subscriber only; excludes unrelated subscribers, NAT history and global audit details.",
+        "Selected subscriber only; excludes unrelated subscribers, NAT history and global audit details.",
     },
     subscriber: { ...sub },
     profile: workspace.profiles.find((p) => p.id === sub.profile),

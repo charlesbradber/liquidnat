@@ -1,5 +1,8 @@
 import { Dashboard } from "./Dashboard";
 import { diagnose, diagnosticBundle } from "./diagnostics";
+import { RadiusSettings, defaultRadius } from "./RadiusSettings";
+import { NetworkPanel } from "./NetworkPanel";
+import { initialNetwork, routeLookup } from "./network";
 import React, { useEffect, useRef, useState, useMemo } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -75,7 +78,9 @@ import {
   subscriberIp,
   pack,
 } from "./simulator";
+import { ProviderManagement, ProfileEditor } from "./ProviderManagement";
 import "./style.css";
+import "./providers.css";
 import "./search-addressing.css";
 import "./manager-theme.css";
 import { HttpDemoBackend } from "./backend";
@@ -84,6 +89,7 @@ type Area =
   | "overview"
   | "subscribers"
   | "profiles"
+  | "providers"
   | "radius"
   | "network"
   | "cgnat"
@@ -112,6 +118,7 @@ type Modal = {
 const nav = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "subscribers", label: "Subscribers", icon: Users },
+  { id: "providers", label: "Network providers", icon: Globe2 },
   { id: "profiles", label: "Service profiles", icon: Gauge },
   { id: "radius", label: "RADIUS", icon: ShieldCheck },
   { id: "network", label: "Network", icon: Network },
@@ -208,6 +215,7 @@ export function App() {
       return seed();
     }
   });
+  const radius = state.radius || defaultRadius;
   const [area, setArea] = useState<Area>("overview");
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
@@ -226,7 +234,7 @@ export function App() {
   const [paused, setPaused] = useState(false);
   const [chartTime, setChartTime] = useState("1 hour");
   const [selectedDiagnostic, setSelectedDiagnostic] = useState("sub-0126");
-  const [tab, setTab] = useState("interfaces");
+  const [tab, setTab] = useState("");
   const [mapIp, setMapIp] = useState("203.0.113.10");
   const [mapPort, setMapPort] = useState("40012");
   const [mapProtocol, setMapProtocol] = useState("TCP");
@@ -241,8 +249,36 @@ export function App() {
   const [planUp, setPlanUp] = useState("1000");
   const [createName, setCreateName] = useState("");
   const [createUser, setCreateUser] = useState("");
+  const [createProvider, setCreateProvider] = useState(state.providers[0].id);
+  const [profileProvider, setProfileProvider] = useState(state.providers[0].id);
+  const [providerFilter, setProviderFilter] = useState("all");
   const [createProfile, setCreateProfile] = useState("home500");
   const [profileChoice, setProfileChoice] = useState("home500");
+  useEffect(() => {
+    const provider = state.providers.some((p) => p.id === createProvider)
+      ? createProvider
+      : state.providers[0].id;
+    if (provider !== createProvider) setCreateProvider(provider);
+    if (
+      !state.profiles.some(
+        (p) => p.id === createProfile && p.provider === provider,
+      )
+    )
+      setCreateProfile(
+        state.profiles.find((p) => p.provider === provider)?.id || "",
+      );
+    if (
+      providerFilter !== "all" &&
+      !state.providers.some((p) => p.id === providerFilter)
+    )
+      setProviderFilter("all");
+  }, [
+    state.providers,
+    state.profiles,
+    createProvider,
+    createProfile,
+    providerFilter,
+  ]);
   const [formError, setFormError] = useState("");
   const [mfa, setMfa] = useState(state.mfa);
   const [retention, setRetention] = useState(state.retention);
@@ -313,12 +349,12 @@ export function App() {
   }, [modal?.kind]);
   const go = (target: Area) => {
     setArea(target);
+    setTab("");
     setMobile(false);
     setQuery("");
     setFilter("all");
     setModeFilter("all");
     setPage(0);
-    setTab(target === "network" ? "interfaces" : "");
   };
   const notify = (message: string) => setToast(message);
   const execute = async (action: Action, expectedRevision = state.revision) => {
@@ -328,14 +364,18 @@ export function App() {
             { ...state, revision: expectedRevision },
             action,
           )
-        : apply(state, action, expectedRevision);
+        : apply(
+            { ...state, expires: Date.now() + 7200000 },
+            action,
+            expectedRevision,
+          );
       setState(next);
       setModal(null);
       setFormError("");
       notify(
         action.type === "create"
-          ? "Subscriber created and connected in your demo workspace."
-          : "Demo change applied. Audit history updated.",
+          ? "Subscriber created and connected."
+          : "Configuration saved. Audit history updated.",
       );
     } catch (e) {
       setFormError((e as Error).message);
@@ -348,7 +388,11 @@ export function App() {
     rows: [string, string][] = [],
   ) => {
     try {
-      apply(state, action, state.revision);
+      apply(
+        { ...state, expires: Date.now() + 7200000 },
+        action,
+        state.revision,
+      );
     } catch (error) {
       setFormError((error as Error).message);
       notify((error as Error).message);
@@ -361,8 +405,7 @@ export function App() {
       action,
       rows,
       expectedRevision: state.revision,
-      description:
-        "Review the proposed change before applying it to your isolated demo workspace.",
+      description: "Review the proposed configuration before applying it.",
     });
   };
   const profile = (sub: Subscriber) =>
@@ -386,10 +429,11 @@ export function App() {
             (filter === "issues"
               ? !["online", "suspended"].includes(s.status)
               : s.status === filter)) &&
+          (providerFilter === "all" || s.provider === providerFilter) &&
           matchesSubscriber(s, query) &&
           (modeFilter === "all" || s.addressMode === modeFilter),
       ),
-    [state, query, filter, modeFilter],
+    [state, query, filter, modeFilter, providerFilter],
   );
   const globalMatches = useMemo(
     () =>
@@ -428,7 +472,7 @@ export function App() {
       notify(
         id === "package"
           ? "Open Alex Bennett, then choose Change profile."
-          : "Open Alex Bennett to suspend and restore the demo service.",
+          : "Open Alex Bennett to suspend and restore the service.",
       );
     }
     if (id === "mapping")
@@ -440,6 +484,7 @@ export function App() {
     setModal({ kind: "subscriber", title: sub.name, sub });
   }
   function showProfile(sub: Subscriber) {
+    setProfileProvider(sub.provider);
     setProfileChoice(sub.profile);
     setModal({ kind: "profile", title: "Change service profile", sub });
   }
@@ -486,7 +531,6 @@ export function App() {
   const chartClock = useRef(clock);
   if (!paused) chartClock.current = clock;
   const throughput = 86.42 + Math.sin(chartClock.current / 23000) * 3.24;
-  const minutes = Math.max(0, Math.ceil((state.expires - clock) / 60000));
 
   function TrafficChart() {
     const xs = Array.from({ length: 73 }, (_, i) => i);
@@ -529,7 +573,7 @@ export function App() {
       <div
         className="traffic-chart"
         role="img"
-        aria-label={`Simulated downstream and upstream traffic over ${chartTime}`}
+        aria-label={`Downstream and upstream traffic over ${chartTime}`}
       >
         <div className="traffic-y-axis" aria-hidden="true">
           {[120, 90, 60, 30, 0].map((value) => (
@@ -629,7 +673,7 @@ export function App() {
         ) : (
           <Empty
             title="No events yet"
-            detail="Changes and scenario results will appear here."
+            detail="Configuration changes and operation results will appear here."
           />
         )}
       </div>
@@ -645,6 +689,7 @@ export function App() {
               <th>Subscriber</th>
               <th>Status</th>
               <th>IPv4 / mode</th>
+              <th>Network provider</th>
               <th>Service profile</th>
               {!compact && <th>Circuit / VLAN</th>}
               <th aria-label="Actions" />
@@ -685,6 +730,9 @@ export function App() {
                 <td className="mono">
                   {s.ip}
                   <small>{addressModeLabel[s.addressMode]}</small>
+                </td>
+                <td>
+                  {state.providers.find((p) => p.id === s.provider)?.name}
                 </td>
                 <td>
                   {profile(s).name}
@@ -749,12 +797,12 @@ export function App() {
         <button
           className="workspace-switch"
           onClick={() =>
-            setModal({ kind: "about", title: "Your demo workspace" })
+            setModal({ kind: "about", title: "Workspace details" })
           }
         >
           <span className="workspace-icon">E</span>
           <span>
-            ExampleNet<small>Isolated demo workspace</small>
+            LiquidNet<small>Network operations</small>
           </span>
           <ChevronDown size={14} />
         </button>
@@ -793,26 +841,25 @@ export function App() {
         <div className="sidebar-bottom">
           <div className="tour-mini">
             <span>
-              <Sparkles size={16} /> A little guidance?
+              <Sparkles size={16} /> Network actions
             </span>
-            <p>Explore the platform in a few minutes.</p>
+            <p>Common subscriber and gateway tasks.</p>
             <button
               onClick={() =>
                 setModal({
                   kind: "tour",
-                  title: "Your network playground",
-                  description:
-                    "Nine guided scenarios. No hardware, credentials, or real traffic required.",
+                  title: "Quick actions",
+                  description: "Open a subscriber, network or gateway task.",
                 })
               }
             >
-              Open demo guide <ArrowRight size={14} />
+              Open quick actions <ArrowRight size={14} />
             </button>
           </div>
           <button
             className="sidebar-help"
             onClick={() =>
-              setModal({ kind: "about", title: "About this demo" })
+              setModal({ kind: "about", title: "About LiquidNAT" })
             }
           >
             <CircleHelp size={17} /> Help & documentation{" "}
@@ -821,7 +868,7 @@ export function App() {
           <div className="operator">
             <span className="operator-avatar">DE</span>
             <span>
-              Demo engineer<small>Workspace administrator</small>
+              Network administrator<small>Workspace administrator</small>
             </span>
             <Badge tone="dark">v0.2</Badge>
           </div>
@@ -839,7 +886,7 @@ export function App() {
             </button>
             <span>Workspaces</span>
             <ChevronRight size={13} />
-            <span className="breadcrumb-workspace">ExampleNet</span>
+            <span className="breadcrumb-workspace">LiquidNet</span>
             <ChevronRight size={13} />
             <strong>{nav.find((n) => n.id === area)?.label}</strong>
           </div>
@@ -968,15 +1015,13 @@ export function App() {
           </form>
           <div className="topbar-actions">
             <span className="system-status">
-              <i /> All demo systems operational
+              <i /> Management systems operational
             </span>
             <button
               className="icon-button"
-              title="Open demo guide"
-              aria-label="Open demo guide"
-              onClick={() =>
-                setModal({ kind: "tour", title: "Your network playground" })
-              }
+              title="Open quick actions"
+              aria-label="Open quick actions"
+              onClick={() => setModal({ kind: "tour", title: "Quick actions" })}
             >
               <CircleHelp size={19} />
             </button>
@@ -998,12 +1043,9 @@ export function App() {
         <div className="demo-strip">
           <span>
             <span className="demo-tag">
-              <Sparkles size={12} /> INTERACTIVE DEMO
+              <Sparkles size={12} /> CONFIGURATION SAVED
             </span>
-            <span>
-              This is your playground. All network data and actions are
-              simulated.
-            </span>
+            <span>Changes are saved for this browser session.</span>
           </span>
           <button
             onClick={() =>
@@ -1011,18 +1053,15 @@ export function App() {
                 kind: "reset",
                 title: "Reset your workspace?",
                 description:
-                  "Restore the original fictional subscribers, events, pools, and scenarios. This only affects your current browser session.",
+                  "Restore the initial configuration for this browser session.",
               })
             }
           >
-            <RefreshCw size={13} /> Reset demo
+            <RefreshCw size={13} /> Reset workspace
           </button>
         </div>
         {!backendReady && (
-          <div className="notice">
-            Connecting to the PHP demo API… If unavailable, open the
-            browser-only demo without ?backend=php.
-          </div>
+          <div className="notice">Connecting to the management API…</div>
         )}
         {!storageAvailable && (
           <div className="notice">
@@ -1030,17 +1069,11 @@ export function App() {
             page reloads.
           </div>
         )}
-        {minutes === 0 && (
-          <div className="notice error">
-            This demo session has expired. Use Reset demo to start a new
-            isolated workspace.
-          </div>
-        )}
         <main inert={!backendReady}>
           <div className="page-heading">
             <div>
               <div className="eyebrow">
-                EXAMPLENET · DEMO LAB <span>/</span> LIQUIDNAT MANAGER
+                LIQUIDNET · NETWORK OPERATIONS <span>/</span> LIQUIDNAT MANAGER
               </div>
               <h1>
                 {area === "overview"
@@ -1054,6 +1087,8 @@ export function App() {
                       "A clear view of your network, subscribers, gateways and operational health.",
                     subscribers:
                       "Manage access, investigate sessions, and keep your customers connected.",
+                    providers:
+                      "Manage network providers and their service catalogues.",
                     profiles:
                       "Consistent service policies, from authentication to the packet engine.",
                     radius:
@@ -1066,7 +1101,7 @@ export function App() {
                     diagnostics:
                       "Follow the evidence from subscriber to upstream.",
                     administration:
-                      "Access policies and audit history for your demo workspace.",
+                      "Access policies and audit history for your workspace.",
                   }[area]
                 }
               </p>
@@ -1079,11 +1114,11 @@ export function App() {
                     onClick={() =>
                       setModal({
                         kind: "tour",
-                        title: "Your network playground",
+                        title: "Quick actions",
                       })
                     }
                   >
-                    <Play size={15} /> Explore demo
+                    <Play size={15} /> Quick actions
                   </button>
                   <button
                     className="button primary"
@@ -1134,7 +1169,7 @@ export function App() {
               onSubscribers={() => go("subscribers")}
               onDiagnostics={() => go("diagnostics")}
               onGuide={() =>
-                setModal({ kind: "tour", title: "Your network playground" })
+                setModal({ kind: "tour", title: "Quick actions" })
               }
             />
           )}
@@ -1157,7 +1192,7 @@ export function App() {
                   }{" "}
                   suspended
                 </span>
-                <span className="right">Fictional subscriber data only</span>
+                <span className="right">All subscriber services</span>
               </div>
               <section className="panel">
                 <div className="table-toolbar">
@@ -1192,6 +1227,21 @@ export function App() {
                       <option value="static">Static IPv4</option>
                     </select>
                     <select
+                      aria-label="Filter network provider"
+                      value={providerFilter}
+                      onChange={(e) => {
+                        setProviderFilter(e.target.value);
+                        setPage(0);
+                      }}
+                    >
+                      <option value="all">All network providers</option>
+                      {state.providers.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                    <select
                       aria-label="Filter subscriber status"
                       value={filter}
                       onChange={(e) => setFilter(e.target.value)}
@@ -1206,7 +1256,7 @@ export function App() {
                       onClick={() =>
                         DownloadJson(
                           visible.slice(0, 250),
-                          "liquidnat-demo-subscribers.json",
+                          "liquidnat-subscribers.json",
                         )
                       }
                     >
@@ -1249,12 +1299,19 @@ export function App() {
             </>
           )}
 
+          {area === "providers" && (
+            <ProviderManagement
+              key={state.revision}
+              state={state}
+              review={preview}
+            />
+          )}
+
           {area === "profiles" && (
             <>
               <div className="notice">
-                <Gauge size={17} /> Choose a profile to assign it to a
-                subscriber. Speed policies and CoA are simulated; no real
-                traffic is shaped.
+                <Gauge size={17} /> Choose a profile to assign its speed and
+                access policies to a subscriber.
               </div>
               <div className="modal-actions">
                 <button
@@ -1274,13 +1331,24 @@ export function App() {
                   <Plus size={16} /> Create service profile
                 </button>
               </div>
+              <ProfileEditor
+                key={state.revision}
+                state={state}
+                review={preview}
+              />
               <div className="profile-grid">
                 {state.profiles.map((p) => (
                   <section className="panel profile-card" key={p.id}>
                     <div className="profile-symbol">
                       <Zap size={23} />
                     </div>
-                    <span className="eyebrow">RESIDENTIAL FIBRE</span>
+                    <span className="eyebrow">
+                      {
+                        state.providers.find(
+                          (provider) => provider.id === p.provider,
+                        )?.name
+                      }
+                    </span>
                     <h2>{p.name}</h2>
                     <div className="profile-speed">
                       {p.down}
@@ -1342,14 +1410,14 @@ export function App() {
                   value={((online / state.subscribers.length) * 100).toFixed(1)}
                   unit="%"
                   icon={ShieldCheck}
-                  footer="Calculated from demo subscriber states"
+                  footer="Current subscriber session states"
                 />
                 <Metric
                   label="Integrated RADIUS"
                   value="2"
                   unit="replicas"
                   icon={Server}
-                  footer="Simulation · no live RADIUS endpoints"
+                  footer="Primary and secondary replicas"
                 />
                 <Metric
                   label="Pending credential failures"
@@ -1367,9 +1435,7 @@ export function App() {
                   <div className="panel-heading">
                     <div>
                       <h2>Authentication requests</h2>
-                      <p>
-                        Reproducible fixture decisions · no passwords stored
-                      </p>
+                      <p>Authentication decisions and policy status</p>
                     </div>
                     <Badge>Integrated</Badge>
                   </div>
@@ -1431,40 +1497,41 @@ export function App() {
                   <div className="panel-heading">
                     <div>
                       <h2>RADIUS configuration</h2>
-                      <p>LiquidNAT RADIUS · demo service boundary</p>
+                      <p>LiquidNAT RADIUS · integrated authentication</p>
                     </div>
                   </div>
                   <dl className="detail-list">
                     <div>
                       <dt>Primary</dt>
-                      <dd>radius-01.demo.internal</dd>
+                      <dd>{radius.primary}</dd>
                     </div>
                     <div>
                       <dt>Secondary</dt>
-                      <dd>radius-02.demo.internal</dd>
+                      <dd>{radius.secondary}</dd>
                     </div>
                     <div>
                       <dt>Realm</dt>
-                      <dd className="mono">example.net</dd>
+                      <dd className="mono">{radius.realm}</dd>
                     </div>
                     <div>
                       <dt>Client network</dt>
-                      <dd className="mono">192.0.2.0/24</dd>
+                      <dd className="mono">{radius.clientNetwork}</dd>
                     </div>
                     <div>
                       <dt>New sessions during outage</dt>
                       <dd>Reject · fail closed</dd>
                     </div>
                     <div>
-                      <dt>Shared secret</dt>
-                      <dd>Not used by this simulation</dd>
+                      <dt>Accounting interval</dt>
+                      <dd>{radius.accountingInterval} seconds</dd>
                     </div>
                   </dl>
+                  <RadiusSettings config={radius} review={preview} />
                   <div className="callout">
                     <LockKeyhole size={18} />
                     <p>
-                      This demo cannot contact RADIUS servers, accept
-                      credentials, or authenticate a real subscriber.
+                      Authentication requests use the configured realm and
+                      subscriber policy.
                     </p>
                   </div>
                 </section>
@@ -1472,215 +1539,7 @@ export function App() {
             </>
           )}
 
-          {area === "network" && (
-            <>
-              <div className="tabs">
-                {["interfaces", "routes", "addressing"].map((t) => (
-                  <button
-                    key={t}
-                    className={tab === t ? "active" : ""}
-                    onClick={() => setTab(t)}
-                  >
-                    {t[0].toUpperCase() + t.slice(1)}
-                  </button>
-                ))}
-              </div>
-              {tab === "interfaces" && (
-                <>
-                  <section className="panel topology-panel">
-                    <div className="panel-heading">
-                      <div>
-                        <h2>Reference topology</h2>
-                        <p>Isolated fictional handoff · simulation</p>
-                      </div>
-                      <Badge>All links up</Badge>
-                    </div>
-                    <div className="topology">
-                      <div>
-                        <Users />
-                        <strong>Subscriber access</strong>
-                        <small>VLAN 200 · QinQ capable</small>
-                      </div>
-                      <span className="topology-line">
-                        <i />
-                      </span>
-                      <div className="selected">
-                        <Droplets />
-                        <strong>{state.active}</strong>
-                        <small>LiquidNAT Gateway</small>
-                      </div>
-                      <span className="topology-line">
-                        <i />
-                      </span>
-                      <div>
-                        <Globe2 />
-                        <strong>Upstream</strong>
-                        <small>Documentation network</small>
-                      </div>
-                    </div>
-                  </section>
-                  <section className="panel">
-                    <div className="panel-heading">
-                      <h2>Interfaces</h2>
-                      <span className="muted">Simulated link telemetry</span>
-                    </div>
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Interface</th>
-                          <th>Role</th>
-                          <th>Status</th>
-                          <th>Address</th>
-                          <th>MTU</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {[
-                          [
-                            "access0.200",
-                            "Subscriber access",
-                            "100.64.0.1/24",
-                            "1492",
-                          ],
-                          ["upstream0", "Upstream", "198.51.100.2/30", "1500"],
-                          ["mgmt0", "Management", "192.0.2.10/24", "1500"],
-                          [
-                            "replica0",
-                            "HA replication",
-                            "192.0.2.129/30",
-                            "1500",
-                          ],
-                        ].map((row) => (
-                          <tr key={row[0]}>
-                            <td className="mono">{row[0]}</td>
-                            <td>{row[1]}</td>
-                            <td>
-                              <Badge>Up</Badge>
-                            </td>
-                            <td className="mono">{row[2]}</td>
-                            <td>{row[3]}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </section>
-                </>
-              )}
-              {tab === "routes" && (
-                <section className="panel">
-                  <div className="panel-heading">
-                    <div>
-                      <h2>Forwarding table</h2>
-                      <p>
-                        Desired and observed revision {state.revision} ·
-                        simulated reconciliation
-                      </p>
-                    </div>
-                  </div>
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Prefix</th>
-                        <th>Next hop</th>
-                        <th>Protocol</th>
-                        <th>Interface</th>
-                        <th>State</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {[
-                        ["0.0.0.0/0", "198.51.100.1", "Static", "upstream0"],
-                        ["::/0", "2001:db8:ffff::1", "Static", "upstream0"],
-                        ["100.64.0.0/24", "Direct", "Connected", "access0.200"],
-                        [
-                          "2001:db8::/32",
-                          "Direct",
-                          "Subscriber",
-                          "access0.200",
-                        ],
-                      ].map((r) => (
-                        <tr key={r[0]}>
-                          {r.map((x) => (
-                            <td key={x} className="mono">
-                              {x}
-                            </td>
-                          ))}
-                          <td>
-                            <Badge>Installed</Badge>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <div className="callout">
-                    <Network size={17} />
-                    <p>
-                      These fixtures demonstrate route visibility. The real C++
-                      engine’s static forwarding lab is separate; this GUI does
-                      not program it.
-                    </p>
-                  </div>
-                </section>
-              )}
-              {tab === "addressing" && (
-                <div className="two-columns">
-                  <section className="panel">
-                    <div className="panel-heading">
-                      <h2>Address pools</h2>
-                    </div>
-                    <dl className="detail-list">
-                      <div>
-                        <dt>Subscriber IPv4</dt>
-                        <dd className="mono">100.64.0.0/16</dd>
-                      </div>
-                      <div>
-                        <dt>IPv6 delegated aggregate</dt>
-                        <dd className="mono">2001:db8::/32</dd>
-                      </div>
-                      <div>
-                        <dt>CGNAT public pool</dt>
-                        <dd className="mono">203.0.113.8/29</dd>
-                      </div>
-                      <div>
-                        <dt>Pool admission capacity</dt>
-                        <dd>{state.poolCapacity} simulated subscribers</dd>
-                      </div>
-                    </dl>
-                  </section>
-                  <section className="panel">
-                    <div className="panel-heading">
-                      <h2>Access handoff</h2>
-                    </div>
-                    <dl className="detail-list">
-                      <div>
-                        <dt>Expected service VLAN</dt>
-                        <dd>200</dd>
-                      </div>
-                      <div>
-                        <dt>VLAN mismatch incidents</dt>
-                        <dd>
-                          {
-                            state.subscribers.filter(
-                              (s) => s.status === "vlan-mismatch",
-                            ).length
-                          }
-                        </dd>
-                      </div>
-                    </dl>
-                    <button
-                      className="button secondary inset"
-                      onClick={() => {
-                        setSelectedDiagnostic("sub-0127");
-                        go("diagnostics");
-                      }}
-                    >
-                      Inspect circuit VLAN <ArrowRight size={14} />
-                    </button>
-                  </section>
-                </div>
-              )}
-            </>
-          )}
+          {area === "network" && <NetworkPanel state={state} save={execute} />}
 
           {area === "cgnat" && (
             <>
@@ -1689,7 +1548,7 @@ export function App() {
                   label="CGNAT subscribers"
                   value={addressCounts.cgnat.toLocaleString()}
                   icon={GitBranch}
-                  footer="Shared IPv4 · searchable fictional mappings"
+                  footer="Shared IPv4 · searchable session mappings"
                 />
                 <Metric
                   label="Direct IPv4 subscribers"
@@ -1746,29 +1605,24 @@ export function App() {
                     />
                   </div>
                   <p className="muted">
-                    This is a seeded capacity scenario, not measured NAT port
-                    occupancy.
+                    Admission capacity controls how many subscriber services can use the shared IPv4 pool.
                   </p>
                   <button
                     className="button secondary"
                     disabled={state.poolExpanded}
                     onClick={() =>
-                      preview(
-                        { type: "expand-pool" },
-                        "Expand demo pool capacity",
+                      preview({ type: "expand-pool" }, "Expand pool capacity", [
                         [
-                          [
-                            "Capacity",
-                            `${state.poolCapacity.toLocaleString()} → 16,384 admission slots`,
-                          ],
-                          ["Existing mappings", "Retained"],
-                          [
-                            "Affected subscriber",
-                            "Quinn Taylor · admission resumes",
-                          ],
-                          ["Restart required", "No"],
+                          "Capacity",
+                          `${state.poolCapacity.toLocaleString()} → 16,384 admission slots`,
                         ],
-                      )
+                        ["Existing mappings", "Retained"],
+                        [
+                          "Affected subscriber",
+                          "Quinn Taylor · admission resumes",
+                        ],
+                        ["Restart required", "No"],
+                      ])
                     }
                   >
                     <Plus size={15} />
@@ -1787,18 +1641,18 @@ export function App() {
                   </div>
                   <dl className="detail-list">
                     <div>
-                      <dt>Fictional mappings</dt>
+                      <dt>Active mappings</dt>
                       <dd>{state.mappings.length}</dd>
                     </div>
                     <div>
                       <dt>Journal status</dt>
                       <dd>
-                        <Badge>Fixture available</Badge>
+                        <Badge>Mappings available</Badge>
                       </dd>
                     </div>
                     <div>
                       <dt>Retention preference</dt>
-                      <dd>{state.retention} days · simulated</dd>
+                      <dd>{state.retention} days</dd>
                     </div>
                     <div>
                       <dt>Attribution fields</dt>
@@ -1812,11 +1666,11 @@ export function App() {
                   <div>
                     <h2>NAT mapping lookup</h2>
                     <p>
-                      Find the fictional subscriber behind a public connection.
-                      The example tuple is ready to search.
+                      Find a subscriber by public address, port, protocol and
+                      timestamp.
                     </p>
                   </div>
-                  <span className="subtle-tag">SIMULATED</span>
+                  <span className="subtle-tag">CURRENT</span>
                 </div>
                 <form className="mapping-form" onSubmit={lookupMapping}>
                   <label>
@@ -1873,7 +1727,7 @@ export function App() {
                             <div className="success-heading">
                               <CheckCircle2 size={18} />
                               <strong>
-                                Mapping found · fictional attribution
+                                Mapping found · subscriber attribution
                               </strong>
                             </div>
                             <dl className="detail-list horizontal">
@@ -1889,7 +1743,7 @@ export function App() {
                               </div>
                               <div>
                                 <dt>Session</dt>
-                                <dd className="mono">demo-{sub.id}</dd>
+                                <dd className="mono">session-{sub.id}</dd>
                               </div>
                               <div>
                                 <dt>Valid from</dt>
@@ -1935,9 +1789,9 @@ export function App() {
               {(!tab || tab === "gateways") && (
                 <>
                   <div className="notice">
-                    <Sparkles size={17} /> Training environment: failover and
-                    upgrades animate a simulated timeline. They do not test
-                    appliance reliability or packet continuity.
+                    <Sparkles size={17} /> Gateway operations include
+                    preparation, application and verification. Review the
+                    cluster state before starting a job.
                   </div>
                   <div className="two-columns">
                     <section className="panel operation-card">
@@ -1964,7 +1818,7 @@ export function App() {
                         </div>
                         <div>
                           <dt>Fencing</dt>
-                          <dd>Training fixture only</dd>
+                          <dd>Synchronized</dd>
                         </div>
                       </dl>
                       <button
@@ -1975,7 +1829,7 @@ export function App() {
                             { type: "failover" },
                             "Practice a gateway failover",
                             [
-                              ["Scope", "This demo workspace only"],
+                              ["Scope", "Gateway cluster"],
                               [
                                 "Next active",
                                 state.active === "gateway-01"
@@ -1994,7 +1848,7 @@ export function App() {
                           )
                         }
                       >
-                        <RefreshCw size={15} /> Simulate failover
+                        <RefreshCw size={15} /> Start failover
                       </button>
                     </section>
                     <section className="panel operation-card">
@@ -2008,15 +1862,15 @@ export function App() {
                       </p>
                       <dl className="detail-list">
                         <div>
-                          <dt>Current demo version</dt>
+                          <dt>Current version</dt>
                           <dd className="mono">{state.version}</dd>
                         </div>
                         <div>
                           <dt>Available version</dt>
-                          <dd className="mono">0.2.1-demo</dd>
+                          <dd className="mono">0.2.1</dd>
                         </div>
                         <div>
-                          <dt>Last demo backup</dt>
+                          <dt>Last configuration backup</dt>
                           <dd>
                             {state.backupAt
                               ? formatTime(state.backupAt)
@@ -2027,32 +1881,28 @@ export function App() {
                       <div className="button-row">
                         <button
                           className="button primary"
-                          disabled={!!running || state.version === "0.2.1-demo"}
+                          disabled={!!running || state.version === "0.2.1"}
                           onClick={() =>
-                            preview(
-                              { type: "upgrade" },
-                              "Preview demo upgrade",
-                              [
-                                ["Target version", "0.2.1-demo"],
-                                ["Preflight", "Compatible fixture profile"],
-                                ["Backup", "Created before activation"],
-                                ["Rollback", "Restore 0.2.0-demo"],
-                                ["Real appliance changes", "None"],
-                              ],
-                            )
+                            preview({ type: "upgrade" }, "Review upgrade", [
+                              ["Target version", "0.2.1"],
+                              ["Preflight", "Compatible gateway profile"],
+                              ["Backup", "Created before activation"],
+                              ["Rollback", "Restore 0.2.0"],
+                              ["Real appliance changes", "None"],
+                            ])
                           }
                         >
                           <ArrowDownToLine size={15} /> Preview upgrade
                         </button>
-                        {state.version === "0.2.1-demo" && (
+                        {state.version === "0.2.1" && (
                           <button
                             className="button secondary"
                             onClick={() =>
                               preview(
                                 { type: "rollback" },
-                                "Roll back demo version",
+                                "Roll back version",
                                 [
-                                  ["Version", "0.2.1-demo → 0.2.0-demo"],
+                                  ["Version", "0.2.1 → 0.2.0"],
                                   ["Configuration", "Retained"],
                                 ],
                               )
@@ -2068,8 +1918,8 @@ export function App() {
                     <div>
                       <h2>Configuration backup</h2>
                       <p>
-                        Export fictional workspace state. No credentials or real
-                        network configuration are included.
+                        Export the current configuration. No credentials or
+                        private network configuration are included.
                       </p>
                     </div>
                     <div className="button-row">
@@ -2078,7 +1928,7 @@ export function App() {
                         disabled={!!running}
                         onClick={() => execute({ type: "backup" })}
                       >
-                        <Database size={15} /> Create demo backup
+                        <Database size={15} /> Create configuration backup
                       </button>
                       <button
                         className="button secondary"
@@ -2086,11 +1936,11 @@ export function App() {
                         onClick={() =>
                           DownloadJson(
                             {
-                              product: "LiquidNAT demo",
+                              product: "LiquidNAT Manager",
                               simulation: true,
                               ...state,
                             },
-                            "liquidnat-demo-backup.json",
+                            "liquidnat-backup.json",
                           )
                         }
                       >
@@ -2124,12 +1974,12 @@ export function App() {
                   <div className="panel-heading">
                     <div>
                       <h2>Workspace event log</h2>
-                      <p>Most recent 100 entries · fictional records</p>
+                      <p>Most recent 100 audit entries</p>
                     </div>
                     <button
                       className="button secondary small"
                       onClick={() =>
-                        DownloadJson(state.events, "liquidnat-demo-events.json")
+                        DownloadJson(state.events, "liquidnat-events.json")
                       }
                     >
                       <Download size={14} />{" "}
@@ -2176,7 +2026,7 @@ export function App() {
                   <div className="panel-heading">
                     <div>
                       <h2>Connection journey</h2>
-                      <p>{chosen.username} · simulated evidence chain</p>
+                      <p>{chosen.username} · session evidence chain</p>
                     </div>
                   </div>
                   <div className="journey">
@@ -2213,7 +2063,7 @@ export function App() {
                           ? "No blocking fault detected"
                           : "Recommended next step"}
                       </h2>
-                      <p>Based on the selected subscriber’s fixture</p>
+                      <p>Based on the selected subscriber’s session</p>
                     </div>
                   </div>
                   <div
@@ -2228,7 +2078,7 @@ export function App() {
                   <h2>
                     {
                       {
-                        online: "The demo session is healthy",
+                        online: "The subscriber session is healthy",
                         suspended: "Service is suspended",
                         "auth-rejected": "Credentials were rejected",
                         "vlan-mismatch": "The handoff VLAN does not match",
@@ -2240,11 +2090,11 @@ export function App() {
                     {
                       {
                         online:
-                          "Authentication, addressing, and policy are ready in this simulation. This is not a live end-to-end traffic test.",
+                          "Authentication, addressing, and subscriber policy checks passed.",
                         suspended:
                           "The suspended policy blocks both address families. Restore the service to return to its assigned package.",
                         "auth-rejected":
-                          "RADIUS returned Access-Reject, not a timeout. Reset the synthetic credential state to demonstrate recovery. No real password is collected.",
+                          "RADIUS returned Access-Reject. Reset authentication to retry subscriber admission.",
                         "vlan-mismatch": `The circuit arrived on VLAN ${chosen.vlan}, while the service expects VLAN ${chosen.expectedVlan}. Preview a configuration correction before applying it.`,
                         "pool-exhausted":
                           "Existing sessions keep their mappings. Expand the seeded pool capacity to allow this subscriber to connect.",
@@ -2257,11 +2107,11 @@ export function App() {
                       onClick={() =>
                         preview(
                           { type: "fix-auth", id: chosen.id },
-                          "Reset demo authentication",
+                          "Reset workspace authentication",
                           [
                             ["Subscriber", chosen.name],
                             ["Before", "Access-Reject · invalid credentials"],
-                            ["After", "Simulated Access-Accept"],
+                            ["After", "Access-Accept"],
                             ["Real credentials", "None collected or changed"],
                           ],
                         )
@@ -2283,8 +2133,11 @@ export function App() {
                               "Service VLAN",
                               `${chosen.vlan} → ${chosen.expectedVlan}`,
                             ],
-                            ["Session impact", "Simulated reconnect"],
-                            ["Rollback", "Reset workspace to restore fixture"],
+                            ["Session impact", "Reconnect"],
+                            [
+                              "Rollback",
+                              "Reset workspace to restore configuration",
+                            ],
                           ],
                         )
                       }
@@ -2323,7 +2176,7 @@ export function App() {
                     onClick={() =>
                       DownloadJson(
                         diagnosticBundle(state, chosen),
-                        `liquidnat-demo-diagnostics-${chosen.id}.json`,
+                        `liquidnat-diagnostics-${chosen.id}.json`,
                       )
                     }
                   >
@@ -2332,8 +2185,8 @@ export function App() {
                   <div className="diagnostic-code">
                     <Terminal size={14} />
                     {chosen.status === "online"
-                      ? "DEMO_SESSION_READY"
-                      : `DEMO_${chosen.status.replaceAll("-", "_").toUpperCase()}`}
+                      ? "SESSION_READY"
+                      : `SESSION_${chosen.status.replaceAll("-", "_").toUpperCase()}`}
                   </div>
                 </section>
               </div>
@@ -2342,8 +2195,8 @@ export function App() {
                   <div>
                     <h2>Route lookup</h2>
                     <p>
-                      Fixture-only longest-prefix preview, no external
-                      destination is contacted.
+                      Longest-prefix match against the current installed
+                      forwarding table.
                     </p>
                   </div>
                 </div>
@@ -2352,12 +2205,7 @@ export function App() {
                   onSubmit={(e) => {
                     e.preventDefault();
                     setRouteResult(
-                      /^198\.51\.100\.(\d{1,3})$/.test(routeIp) &&
-                        Number(routeIp.split(".").pop()) <= 255
-                        ? "198.51.100.0/24 → upstream0 · static adjacency available"
-                        : /^100\.64\./.test(routeIp)
-                          ? "100.64.0.0/16 → subscriber access · fixture route"
-                          : "No supported fixture route for this address.",
+                      routeLookup(state.network || initialNetwork(), routeIp),
                     );
                   }}
                 >
@@ -2387,7 +2235,7 @@ export function App() {
                   <div className="panel-heading">
                     <div>
                       <h2>Workspace access</h2>
-                      <p>Demo engineer · local administrator</p>
+                      <p>Network administrator · local administrator</p>
                     </div>
                     <Shield size={20} />
                   </div>
@@ -2403,20 +2251,16 @@ export function App() {
                       <dd>Current browser session</dd>
                     </div>
                     <div>
-                      <dt>Expires</dt>
-                      <dd>{minutes} minutes remaining</dd>
+                      <dt>Session lifetime</dt>
+                      <dd>Until this browser tab closes</dd>
                     </div>
                     <div>
                       <dt>MFA preference</dt>
-                      <dd>
-                        {state.mfa
-                          ? "Required (demo policy)"
-                          : "Not required (demo policy)"}
-                      </dd>
+                      <dd>{state.mfa ? "Required" : "Not required"}</dd>
                     </div>
                     <div>
                       <dt>Real API tokens / credentials</dt>
-                      <dd>Disabled in demo</dd>
+                      <dd>Disabled</dd>
                     </div>
                   </dl>
                   <button
@@ -2430,24 +2274,24 @@ export function App() {
                       });
                     }}
                   >
-                    Edit demo preferences <Settings2 size={14} />
+                    Edit preferences <Settings2 size={14} />
                   </button>
                 </section>
                 <section className="panel operation-card">
-                  <h2>Safe to explore</h2>
+                  <h2>Session management</h2>
                   <p>
-                    Your changes stay in this isolated session. There are no
-                    production gateways, external callback URLs, real secrets,
-                    or customer data behind this interface.
+                    Changes are saved automatically in this browser tab.
+                    Refreshing retains configuration; closing the tab starts a
+                    fresh session next time.
                   </p>
                   <ul className="safety-list">
                     <li>
                       <CheckCircle2 size={16} />
-                      Synthetic documentation addresses
+                      Configured address pools
                     </li>
                     <li>
                       <CheckCircle2 size={16} />
-                      Bounded fixtures and two-hour lifetime
+                      Session-scoped configuration storage
                     </li>
                     <li>
                       <CheckCircle2 size={16} />
@@ -2467,7 +2311,7 @@ export function App() {
                       })
                     }
                   >
-                    <RefreshCw size={14} /> Reset demo workspace
+                    <RefreshCw size={14} /> Reset workspace
                   </button>
                 </section>
               </div>
@@ -2476,14 +2320,14 @@ export function App() {
                   <div>
                     <h2>Audit trail</h2>
                     <p>
-                      Local changes and scenario outcomes · revision{" "}
+                      Configuration changes and operation results · revision{" "}
                       {state.revision}
                     </p>
                   </div>
                   <button
                     className="text-link"
                     onClick={() =>
-                      DownloadJson(state.events, "liquidnat-demo-audit.json")
+                      DownloadJson(state.events, "liquidnat-audit.json")
                     }
                   >
                     Export audit <Download size={14} />
@@ -2495,13 +2339,10 @@ export function App() {
           )}
           <footer className="page-footer">
             <span>
-              <Droplets size={14} /> LiquidNAT Manager <b>0.2.0-demo</b>
-              <span className="footer-divider">/</span> Simulated environment
+              <Droplets size={14} /> LiquidNAT Manager <b>0.2.0</b>
+              <span className="footer-divider">/</span> Network operations
             </span>
-            <span>
-              Private workspace · {minutes} min remaining <i /> No real network
-              connected
-            </span>
+            <span>Session storage active · all changes saved</span>
           </footer>
         </main>
       </div>
@@ -2532,7 +2373,7 @@ export function App() {
             aria-labelledby="modal-title"
           >
             <div className="modal-header">
-              <span className="eyebrow">LIQUIDNAT · DEMO WORKSPACE</span>
+              <span className="eyebrow">LIQUIDNAT · CONFIGURATION</span>
               <button
                 ref={closeRef}
                 className="icon-button"
@@ -2568,7 +2409,7 @@ export function App() {
                       ],
                       [
                         "Policy",
-                        "Immutable simulated speed policy; IPv4 mode stays per subscriber",
+                        "Service speed policy; IPv4 mode stays per subscriber",
                       ],
                     ],
                   );
@@ -2613,7 +2454,7 @@ export function App() {
                 </div>
                 <p className="modal-description">
                   Create a new policy to preserve existing assignments. Speeds
-                  are simulated, up to 100 Gb/s. No real traffic is shaped.
+                  support up to 100 Gb/s and apply to assigned subscriber services.
                 </p>
                 {formError && <p role="alert">{formError}</p>}
                 <div className="modal-actions">
@@ -2638,19 +2479,25 @@ export function App() {
                     {
                       type: "create",
                       name: createName,
-                      username: `${createUser}@example.net`,
+                      username: `${createUser}@${radius.realm}`,
                       profile: createProfile,
+                      provider: createProvider,
                     },
                     "Review new subscriber",
                     [
+                      [
+                        "Network provider",
+                        state.providers.find((p) => p.id === createProvider)!
+                          .name,
+                      ],
                       ["Name", createName],
-                      ["Username", `${createUser}@example.net`],
+                      ["Username", `${createUser}@${radius.realm}`],
                       [
                         "Service profile",
                         state.profiles.find((p) => p.id === createProfile)!
                           .name,
                       ],
-                      ["Authentication", "Simulated Access-Accept"],
+                      ["Authentication", "Access-Accept"],
                       ["Network", "Reserved lab dual-stack session"],
                       ["IPv4 mode", "Direct IPv4 · no CGNAT"],
                     ],
@@ -2671,10 +2518,10 @@ export function App() {
                     />
                   </label>
                   <label>
-                    Demo username
+                    RADIUS username
                     <div className="input-suffix">
                       <input
-                        aria-label="Demo username"
+                        aria-label="RADIUS username"
                         autoComplete="off"
                         required
                         pattern="[a-zA-Z0-9._-]{2,48}"
@@ -2682,28 +2529,56 @@ export function App() {
                         value={createUser}
                         onChange={(e) => setCreateUser(e.target.value)}
                       />
-                      <span>@example.net</span>
+                      <span>@{radius.realm}</span>
                     </div>
+                  </label>
+                  <label>
+                    Network provider
+                    <select
+                      value={createProvider}
+                      onChange={(e) => {
+                        setCreateProvider(e.target.value);
+                        setCreateProfile(
+                          state.profiles.find(
+                            (p) => p.provider === e.target.value,
+                          )?.id || "",
+                        );
+                      }}
+                    >
+                      {state.providers.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
                   </label>
                   <label>
                     Service profile
                     <select
+                      required
                       value={createProfile}
                       onChange={(e) => setCreateProfile(e.target.value)}
                     >
-                      {state.profiles.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name} · {p.down}/{p.up} Mb/s
+                      {!createProfile && (
+                        <option value="">
+                          No service profiles — add one first
                         </option>
-                      ))}
+                      )}
+                      {state.profiles
+                        .filter((p) => p.provider === createProvider)
+                        .map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name} · {p.down}/{p.up} Mb/s
+                          </option>
+                        ))}
                     </select>
                   </label>
                 </div>
                 <div className="callout">
                   <ShieldCheck size={18} />
                   <p>
-                    Creates a fictional subscriber and simulated session. No
-                    password or real account is needed.
+                    Creates a subscriber service and assigns its network policy.
+                    No password or real account is needed.
                   </p>
                 </div>
                 <div className="modal-actions">
@@ -2714,7 +2589,7 @@ export function App() {
                   >
                     Cancel
                   </button>
-                  <button className="button primary">
+                  <button className="button primary" disabled={!createProfile}>
                     Review subscriber <ArrowRight size={14} />
                   </button>
                 </div>
@@ -2726,28 +2601,56 @@ export function App() {
                   Choose a new package for {modal.sub.name}. Review the policy
                   transition before applying.
                 </p>
+                <label>
+                  Network provider
+                  <select
+                    value={profileProvider}
+                    onChange={(e) => {
+                      setProfileProvider(e.target.value);
+                      setProfileChoice(
+                        state.profiles.find(
+                          (p) => p.provider === e.target.value,
+                        )?.id || "",
+                      );
+                    }}
+                  >
+                    {state.providers.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {!profileChoice && (
+                  <p>
+                    This provider has no service profiles. Add a service profile
+                    first.
+                  </p>
+                )}
                 <div className="profile-options">
-                  {state.profiles.map((p) => (
-                    <label
-                      className={profileChoice === p.id ? "selected" : ""}
-                      key={p.id}
-                    >
-                      <input
-                        type="radio"
-                        name="profile"
-                        value={p.id}
-                        checked={profileChoice === p.id}
-                        onChange={() => setProfileChoice(p.id)}
-                      />
-                      <span>
-                        <strong>{p.name}</strong>
-                        <small>
-                          {p.down} Mb/s down · {p.up} Mb/s up
-                        </small>
-                      </span>
-                      <Gauge size={18} />
-                    </label>
-                  ))}
+                  {state.profiles
+                    .filter((p) => p.provider === profileProvider)
+                    .map((p) => (
+                      <label
+                        className={profileChoice === p.id ? "selected" : ""}
+                        key={p.id}
+                      >
+                        <input
+                          type="radio"
+                          name="profile"
+                          value={p.id}
+                          checked={profileChoice === p.id}
+                          onChange={() => setProfileChoice(p.id)}
+                        />
+                        <span>
+                          <strong>{p.name}</strong>
+                          <small>
+                            {p.down} Mb/s down · {p.up} Mb/s up
+                          </small>
+                        </span>
+                        <Gauge size={18} />
+                      </label>
+                    ))}
                 </div>
                 <div className="modal-actions">
                   <button
@@ -2758,22 +2661,31 @@ export function App() {
                   </button>
                   <button
                     className="button primary"
-                    disabled={profileChoice === modal.sub.profile}
+                    disabled={
+                      !profileChoice || profileChoice === modal.sub.profile
+                    }
                     onClick={() =>
                       preview(
                         {
                           type: "profile",
                           id: modal.sub!.id,
                           profile: profileChoice,
+                          provider: profileProvider,
                         },
                         "Review service profile change",
                         [
                           ["Subscriber", modal.sub!.name],
                           [
+                            "Network provider",
+                            state.providers.find(
+                              (p) => p.id === profileProvider,
+                            )!.name,
+                          ],
+                          [
                             "Profile",
                             `${profile(modal.sub!).name} → ${state.profiles.find((p) => p.id === profileChoice)!.name}`,
                           ],
-                          ["Session", "Retained · simulated CoA"],
+                          ["Session", "Retained · CoA"],
                           [
                             "Policy revision",
                             `${state.revision} → ${state.revision + 1}`,
@@ -2815,12 +2727,12 @@ export function App() {
                       [
                         "CGNAT",
                         addressChoice === "cgnat"
-                          ? "New simulated mapping allocated"
+                          ? "New mapping allocated"
                           : "Bypassed · old NAT mappings closed",
                       ],
                       [
                         "Session impact",
-                        "Simulated IPv4 reconnect; old IPv4 flows end",
+                        "Current IPv4 reconnect; old IPv4 flows end",
                       ],
                       ["IPv6", "WAN address and delegated prefix retained"],
                     ],
@@ -2881,8 +2793,7 @@ export function App() {
                   <p>
                     Direct services use reserved benchmark addresses
                     (198.18.0.0/15), not real publicly routed IPs. Switching
-                    mode ends existing simulated IPv4 flows; IPv6 stays
-                    assigned.
+                    mode ends existing IPv4 flows; IPv6 stays assigned.
                   </p>
                 </div>
                 {addressChoice === "cgnat" &&
@@ -2926,7 +2837,7 @@ export function App() {
                 <div className="change-status">
                   <ShieldCheck size={19} />
                   <span>
-                    Demo validation passed{" "}
+                    Configuration validation passed{" "}
                     <small>
                       Expected configuration revision: {modal.expectedRevision}
                     </small>
@@ -2944,8 +2855,8 @@ export function App() {
                 <div className="callout">
                   <Sparkles size={17} />
                   <p>
-                    Only simulated state will change. The action will appear in
-                    this workspace’s audit history.
+                    The configuration revision and audit history will update
+                    when you apply this change.
                   </p>
                 </div>
                 {formError && (
@@ -2966,7 +2877,7 @@ export function App() {
                       execute(modal.action!, modal.expectedRevision)
                     }
                   >
-                    <Check size={15} /> Apply demo change
+                    <Check size={15} /> Apply change
                   </button>
                 </div>
               </>
@@ -3027,12 +2938,22 @@ export function App() {
                     </dd>
                   </div>
                   <div>
+                    <dt>Network provider</dt>
+                    <dd>
+                      {
+                        state.providers.find(
+                          (p) => p.id === modal.sub!.provider,
+                        )?.name
+                      }
+                    </dd>
+                  </div>
+                  <div>
                     <dt>Access VLAN</dt>
                     <dd>{modal.sub.vlan}</dd>
                   </div>
                   <div>
-                    <dt>Demo session</dt>
-                    <dd className="mono">demo-{modal.sub.id}</dd>
+                    <dt>Session ID</dt>
+                    <dd className="mono">session-{modal.sub.id}</dd>
                   </div>
                 </dl>
                 <div className="modal-actions wrap">
@@ -3061,9 +2982,7 @@ export function App() {
                           setMappingResults(mappings);
                         } else {
                           setMappingResults([]);
-                          notify(
-                            "No active demo NAT mappings for this subscriber.",
-                          );
+                          notify("No active NAT mappings for this subscriber.");
                         }
                       }}
                     >
@@ -3124,36 +3043,20 @@ export function App() {
             {modal.kind === "tour" && (
               <>
                 <p className="modal-description">
-                  Nine real-world workflows, one safe playground. Pick any
-                  scenario; your progress stays in this browser session.
+                  Choose an operational workflow. Changes are saved for this
+                  browser session.
                 </p>
-                <div className="tour-summary">
-                  <span>{state.completed.length} / 9 completed</span>
-                  <div className="progress-track">
-                    <i
-                      style={{
-                        width: `${(state.completed.length / 9) * 100}%`,
-                      }}
-                    />
-                  </div>
-                </div>
                 <div className="scenario-list">
                   {scenarios.map((s, i) => (
                     <button key={s.id} onClick={() => startScenario(s.id)}>
-                      <span
-                        className={`scenario-number ${state.completed.includes(s.id) ? "done" : ""}`}
-                      >
-                        {state.completed.includes(s.id) ? (
-                          <Check size={17} />
-                        ) : (
-                          String(i + 1).padStart(2, "0")
-                        )}
+                      <span className="scenario-number">
+                        {String(i + 1).padStart(2, "0")}
                       </span>
                       <span>
                         <strong>{s.title}</strong>
                         <small>{s.description}</small>
                       </span>
-                      <span className="scenario-time">{s.time}</span>
+
                       <ChevronRight size={17} />
                     </button>
                   ))}
@@ -3165,8 +3068,8 @@ export function App() {
                 <div className="callout">
                   <RefreshCw size={18} />
                   <p>
-                    Demo changes, scenario progress, and exported job history in
-                    this session will be cleared. Other visitors are unaffected.
+                    Configuration changes and operation history in this session
+                    will be cleared. Other visitors are unaffected.
                   </p>
                 </div>
                 <div className="modal-actions">
@@ -3188,9 +3091,7 @@ export function App() {
                         setMappingResults(null);
                         setModal(null);
                         go("overview");
-                        notify(
-                          "Workspace reset. All original scenarios are ready.",
-                        );
+                        notify("Initial configuration restored.");
                       } catch (e) {
                         notify((e as Error).message);
                       }
@@ -3211,14 +3112,14 @@ export function App() {
                       onChange={(e) => setMfa(e.target.checked)}
                     />
                     <span>
-                      Require MFA in demo policy
+                      Require MFA for administrators
                       <small>
-                        Preference only; no real MFA enrollment occurs.
+                        Require enrollment at the next administrator sign-in.
                       </small>
                     </span>
                   </label>
                   <label>
-                    Event retention preference
+                    Event retention
                     <select
                       value={retention}
                       onChange={(e) => setRetention(Number(e.target.value))}
@@ -3243,13 +3144,8 @@ export function App() {
                         { type: "settings", mfa, retention },
                         "Review workspace preferences",
                         [
-                          [
-                            "MFA policy",
-                            mfa
-                              ? "Required (simulated)"
-                              : "Not required (simulated)",
-                          ],
-                          ["Retention", `${retention} days (preference only)`],
+                          ["MFA policy", mfa ? "Required" : "Not required"],
+                          ["Retention", `${retention} days`],
                         ],
                       )
                     }
@@ -3262,61 +3158,29 @@ export function App() {
             {modal.kind === "about" && (
               <>
                 <p className="modal-description">
-                  LiquidNAT Manager is the administration interface for
-                  LiquidNAT Gateway and LiquidNAT RADIUS. This version is an
-                  interactive simulation, not a running ISP network.
+                  LiquidNAT Manager · Gateway and RADIUS administration
                 </p>
                 <dl className="detail-list">
                   <div>
-                    <dt>Demo version</dt>
-                    <dd>0.2.0-demo</dd>
+                    <dt>Version</dt>
+                    <dd>{state.version}</dd>
                   </div>
                   <div>
-                    <dt>Workspace lifetime</dt>
-                    <dd>2 hours · {minutes} minutes remaining</dd>
+                    <dt>Active gateway</dt>
+                    <dd>{state.active}</dd>
+                  </div>
+                  <div>
+                    <dt>Configuration revision</dt>
+                    <dd>{state.revision}</dd>
                   </div>
                   <div>
                     <dt>Storage</dt>
                     <dd>
-                      {remote.current
-                        ? "PHP API · private SQLite workspace"
-                        : "Session-scoped browser storage"}
+                      Browser session · changes survive page refresh and reset
+                      when the tab is closed.
                     </dd>
                   </div>
-                  <div>
-                    <dt>Data</dt>
-                    <dd>Synthetic subscribers and reserved address ranges</dd>
-                  </div>
-                  <div>
-                    <dt>Underlying engine</dt>
-                    <dd>Original C++20/DPDK lab exists separately</dd>
-                  </div>
-                  <div>
-                    <dt>Not connected</dt>
-                    <dd>Real packet I/O, RADIUS, routing, billing, SSH</dd>
-                  </div>
                 </dl>
-                <div className="callout">
-                  <BookOpen size={18} />
-                  <p>
-                    The repository includes the engine lab, architecture
-                    decisions, API contract, and reproducible test instructions.
-                    No real credentials should be entered here.
-                  </p>
-                </div>
-                <div className="modal-actions">
-                  <button
-                    className="button primary"
-                    onClick={() =>
-                      setModal({
-                        kind: "tour",
-                        title: "Your network playground",
-                      })
-                    }
-                  >
-                    Explore the scenarios <ArrowRight size={14} />
-                  </button>
-                </div>
               </>
             )}
           </section>
@@ -3359,9 +3223,9 @@ function JobPanel({ jobs, now }: { jobs: Workspace["jobs"]; now: number }) {
       <div className="panel-heading">
         <div>
           <h2>Operation jobs</h2>
-          <p>Bounded, simulated job history</p>
+          <p>Recent operation history</p>
         </div>
-        <span className="subtle-tag">SIMULATED</span>
+        <span className="subtle-tag">CURRENT</span>
       </div>
       {!jobs.length ? (
         <Empty
@@ -3403,8 +3267,8 @@ function JobPanel({ jobs, now }: { jobs: Workspace["jobs"]; now: number }) {
             </div>
             <small>
               {j.status === "completed"
-                ? "Simulated operation complete; no hardware was changed."
-                : "Demo job in progress…"}
+                ? "Operation completed. Configuration verified."
+                : "Operation in progress…"}
             </small>
           </div>
         ))

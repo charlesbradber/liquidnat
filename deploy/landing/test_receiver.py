@@ -41,8 +41,10 @@ class ReceiverTests(unittest.TestCase):
             root = Path(directory)
             dist = root / 'dist'
             dist.mkdir()
-            (dist / 'index.html').write_text('home')
-            (dist / 'about.html').write_text('about')
+            (dist / 'index.php').write_text('home')
+            (dist / 'about.php').write_text('about')
+            (dist / 'includes').mkdir()
+            (dist / 'includes/header.php').write_text('header')
             archive = root / 'release.tar.gz'
             packager.package(dist, archive, COMMIT)
             files, manifest = receiver.decode_release(archive.read_bytes(), COMMIT)
@@ -56,7 +58,7 @@ class ReceiverTests(unittest.TestCase):
             receiver.publish(files, manifest)
             self.assertEqual((demo / 'index.html').read_text(), 'existing demo')
             self.assertEqual((receiver.DOCROOT / '.htaccess').read_text(), 'cpanel')
-            self.assertEqual((receiver.DOCROOT / 'about.html').read_text(), 'about')
+            self.assertEqual((receiver.DOCROOT / 'about.php').read_text(), 'about')
             with self.assertRaises(ValueError):
                 receiver.decode_release(archive.read_bytes(), 'b' * 40)
 

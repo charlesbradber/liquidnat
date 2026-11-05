@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 """Forced SSH command for liquidnat.com landing site. Installed root-owned, runs as liquidnat.
 
-No shell, rsync, SCP, arbitrary commands, PHP, dotfiles, links or client paths.
+No shell, rsync, SCP, arbitrary commands, arbitrary PHP paths, dotfiles, links or client paths.
 """
 import datetime
 import fcntl
@@ -18,7 +18,9 @@ import tempfile
 
 DOCROOT = Path('/home/liquidnat/public_html')
 RELEASES = Path('/home/liquidnat/landing-releases')
-PAGES = frozenset({'radius.html', 'solutions.html', 'index.html', 'platform.html', 'compare.html', 'manager.html', 'resources.html', 'compare-netelastic.html', 'privacy.html', 'about.html', 'contact.html', 'gateway.html', 'news.html', '404.html'})
+PHP_PAGES = frozenset({'compare.php', 'about.php', 'manager.php', 'gateway.php', 'cgnat.php', 'privacy.php', 'news.php', 'solutions.php', 'performance.php', 'platform.php', '404.php', 'migration.php', 'compare-netelastic.php', 'contact.php', 'radius.php', 'deployment.php', 'index.php', 'resources.php'})
+INCLUDES = frozenset({"includes/header.php", "includes/footer.php"})
+PAGES = PHP_PAGES | INCLUDES
 ASSET = re.compile(r'assets/[A-Za-z0-9_-][A-Za-z0-9_.-]*\.(?:js|css|svg|png|jpe?g|webp|ico|woff2?)\Z')
 SHA = re.compile(r'[0-9a-f]{40}\Z')
 MAX_COMPRESSED = 16 * 1024 * 1024
@@ -46,7 +48,7 @@ def decode_release(data, commit):
             if len(content) != member.size:
                 raise ValueError('Truncated archive member')
             files[name] = content
-    if 'index.html' not in files or 'manifest.json' not in files:
+    if 'index.php' not in files or 'manifest.json' not in files:
         raise ValueError('Release requires index and manifest')
     manifest = json.loads(files.pop('manifest.json'))
     if manifest.get('schema') != 1 or manifest.get('commit') != commit:
@@ -54,7 +56,7 @@ def decode_release(data, commit):
     hashes = {name: hashlib.sha256(content).hexdigest() for name, content in files.items()}
     if manifest.get('files') != hashes:
         raise ValueError('Release manifest hash mismatch')
-    for reference in re.findall(r'(?:src|href)=["\'](/assets/[^"\']+)["\']', files['index.html'].decode()):
+    for reference in re.findall(r'(?:src|href)=["\'](/assets/[^"\']+)["\']', files['index.php'].decode()):
         if reference[1:] not in files:
             raise ValueError('Index references a missing release asset')
     return files, manifest
@@ -88,13 +90,14 @@ def publish(files, manifest, rollback=False):
             raise ValueError('Existing source commit has different release bytes')
         atomic_write(stored, content)
     atomic_write(release / 'manifest.json', json.dumps(manifest, sort_keys=True).encode())
+    entry = 'index.php'
     for name, content in files.items():
-        if name == 'index.html':
+        if name == entry:
             continue
         destination = DOCROOT / name
         atomic_write(destination, content)
     # Assets are fully installed first. One atomic rename publishes the new page.
-    atomic_write(DOCROOT / 'index.html', files['index.html'])
+    atomic_write(DOCROOT / entry, files[entry])
     evidence = {'schema': 1, 'commit': manifest['commit'], 'deployed_at': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'rollback': rollback, 'site': 'landing'}
     atomic_write(DOCROOT / 'deployment.json', json.dumps(evidence, sort_keys=True).encode())
     print(json.dumps(evidence), flush=True)
@@ -137,7 +140,7 @@ def main():
                 if name not in PAGES and not ASSET.fullmatch(name):
                     raise ValueError('Invalid rollback member')
                 path = release / name
-                if path.is_symlink() or path.resolve().parent not in (release, release / 'assets'):
+                if path.is_symlink() or path.resolve().parent not in (release, release / 'assets', release / 'includes'):
                     raise ValueError('Unsafe rollback path')
                 files[name] = path.read_bytes()
                 if hashlib.sha256(files[name]).hexdigest() != expected:

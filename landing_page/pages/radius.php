@@ -1,5 +1,11 @@
-LiquidNAT RADIUS
-Connect subscriber identity, authorisation, accounting and service policy with LiquidNAT RADIUS.
+<?php
+$title = 'LiquidNAT RADIUS';
+$description = 'Connect subscriber identity, authorisation, accounting and service policy with LiquidNAT RADIUS.';
+$page = 'radius.php';
+require __DIR__ . '/includes/header.php';
+?>
 <section class="page-hero"><span class="eyebrow">LIQUIDNAT RADIUS</span><h1>Know the subscriber.<br><em>Connect the service.</em></h1><p class="lede">Authentication is the beginning of the story. Bring identity, authorisation, accounting and operational context into the same conversation.</p></section>
 <section class="section"><span class="eyebrow">IDENTITY WITH PURPOSE</span><h2>More than accept or reject.</h2><div class="cards"><article><span>01 /</span><h3>Authentication</h3><p>Understand subscriber identity, access method, client and realm. Distinguish a rejection from a timeout so the next action is clear.</p></article><article><span>02 /</span><h3>Authorisation</h3><p>Connect the subscriber to a defined service profile: addressing, speed, access policy and service state.</p></article><article><span>03 /</span><h3>Accounting</h3><p>Follow start, interim and stop events. Treat retries, duplicates and missing events as operational cases to reconcile.</p></article><article><span>04 /</span><h3>Service changes</h3><p>Plan package changes, suspension, restoration and CoA/disconnect behaviour with a clear view of session impact.</p></article><article><span>05 /</span><h3>Integrated or external</h3><p>Discuss the managed FreeRADIUS architecture or your existing RADIUS environment. Review attributes, dictionaries and server behaviour.</p></article><article><span>06 /</span><h3>Client & realm context</h3><p>Keep clients, realms, server groups and certificates visible in the service design. Separate identity policy from billing business logic.</p></article></div></section>
 <section class="split section"><div><span class="eyebrow">JOIN THE DOTS</span><h2>Make billing<br>and the edge agree.</h2><p>Your billing system knows the commercial relationship. Your network needs precise service intent. Integration translates between them.</p></div><div class="stack"><article><h3>Activation to termination</h3><p>Map create, suspend, restore, package change and terminate workflows to explicit, repeatable service actions.</p></article><article><h3>Safe retries</h3><p>Use stable identifiers, scoped credentials and idempotent operations in the integration design.</p></article><article><h3>Keep the history</h3><p>A terminated service and its accounting or required attribution history have different retention needs.</p></article></div></section>
+
+<?php require __DIR__ . '/includes/footer.php'; ?>

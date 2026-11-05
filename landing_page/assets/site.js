@@ -50,3 +50,46 @@ if (form) {
     catch { copy.focus(); copy.select(); document.querySelector('#form-status').textContent = 'Select and copy the prepared enquiry with your device’s copy command.'; }
   });
 }
+
+// Quote worksheet: no persistence or network requests.
+const yearsInput = document.querySelector('#cost-years');
+if (yearsInput) {
+  const plans = [...document.querySelectorAll('[data-plan]')];
+  let totals = [];
+  function calculateCosts() {
+    const years = Number(yearsInput.value);
+    let valid = yearsInput.value !== '' && Number.isInteger(years) && years >= 1 && years <= 10;
+    totals = plans.map((plan) => {
+      const values = {};
+      let planValid = true;
+      plan.querySelectorAll('[data-cost]').forEach(input => {
+        const value = Number(input.value);
+        const ok = input.value !== '' && Number.isFinite(value) && value >= 0 && value <= 1000000000;
+        input.setAttribute('aria-invalid', String(!ok));
+        planValid = planValid && ok;
+        values[input.dataset.cost] = value;
+      });
+      valid = valid && planValid;
+      const total = values.hardware + values.migration + years * values.annual + years * 12 * values.monthly;
+      plan.querySelector('output').textContent = planValid && Number.isInteger(years) && years >= 1 && years <= 10
+        ? total.toLocaleString('en-GB', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' over ' + years + ' years'
+        : 'Check the entered values';
+      return {name: plan.querySelector('legend').textContent, ...values, years, total};
+    });
+    yearsInput.setAttribute('aria-invalid', String(!(yearsInput.value !== '' && Number.isInteger(years) && years >= 1 && years <= 10)));
+    document.querySelector('#export-costs').disabled = !valid;
+    document.querySelector('#cost-status').textContent = valid
+      ? 'Total = hardware + migration + years × annual + years × 12 × monthly. All figures use your chosen currency. No tax, financing or price changes assumed.'
+      : 'Use a whole-number horizon of 1–10 years and costs between 0 and 1,000,000,000. Enter 0 where a cost does not apply.';
+  }
+  document.querySelectorAll('#cost-years, [data-cost]').forEach(input => input.addEventListener('input', calculateCosts));
+  document.querySelector('#export-costs').addEventListener('click', () => {
+    calculateCosts();
+    if (document.querySelector('#export-costs').disabled) return;
+    const csv = ['Option,Hardware and software,Migration,Annual,Monthly,Years,Total', ...totals.map(p => [p.name,p.hardware,p.migration,p.annual,p.monthly,p.years,p.total.toFixed(2)].join(','))].join('\r\n');
+    const url = URL.createObjectURL(new Blob([csv], {type: 'text/csv;charset=utf-8'}));
+    const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'liquidnat-cost-comparison.csv'; anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+  calculateCosts();
+}

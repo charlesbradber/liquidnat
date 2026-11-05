@@ -1,39 +1,31 @@
-# LiquidNAT marketing website
+# LiquidNAT PHP marketing website
 
-Local website for liquidnat.com. Independent from the existing Manager app. No packages or JavaScript build tools required.
+The live site is https://liquidnat.com/ on the existing cPanel host, separate from the Manager demo.
 
 ## Build and preview
 
-Inside Ubuntu:
-
 ```sh
-cd /home/charlesbradbeer/projects/liquidnat/landing_page
-python3 build.py
-python3 -m http.server 8080 --directory dist --bind 127.0.0.1
+python3 landing_page/build.py
+php -S 127.0.0.1:8080 -t landing_page/dist
 ```
 
-Visit http://localhost:8080. Production deployment is handled by `.github/workflows/landing.yml` on pushes to `main` that change this site, the landing deployment code or its workflow. It can also be run manually from GitHub Actions on `main`.
+PHP CLI is required for linting and verification. Eighteen real PHP entry points share server-rendered navigation, metadata and footer templates. Source pages are in `pages/*.php`, shared components in `shared/*.php`, styles and client interactions in `assets/`. The build copies them into ignored `dist/`, validates PHP syntax and adds content-derived cache versions to CSS/JS links. Change the contact recipient in `site.json`.
 
-The workflow builds and validates the static site, packages a hash-verified release and sends it over pinned-host SSH to a restricted receiver on `master.mywebsitepanel.com`. The fixed destination is `/home/liquidnat/public_html/`. Only allowlisted HTML files and `assets/` files are written; there is no directory sync or deletion. The existing `demo.liquidnat.com/`, `.well-known/`, cPanel `.htaccess`, `php.ini` and `.user.ini` are preserved.
+The expanded comparison includes a twelve-area matrix, category filters, a detailed netElastic comparison and a browser-local cost worksheet with CSV export. Costs are entirely visitor-entered; no prices or savings are assumed and no values are stored or transmitted. The contact form still prepares an email for the visitor to send, rather than providing server-side delivery.
 
-See `../deploy/landing/README.md` for deployment and rollback details.
+Guides cover addressing/CGNAT, deployment, migration and sizing. Homepage, Manager and technical guides link to https://demo.liquidnat.com/. Fixture counts and graphs are identified as simulations; production BNG/CGNAT capability and capacity are not inferred from the UI.
 
-## Editing
+netElastic product-family and selected package features were checked against https://netelastic.com/products and https://netelastic.com/products/packages/ on 5 November 2026. Recheck supplier details before future comparison edits. Acquisition copy comes from the owner.
 
-- Shared navigation and acquisition strip: `shared/header.html`.
-- Shared footer and closing call to action: `shared/footer.html`.
-- Individual page content: `pages/*.html`. The first line is the page title, second is its search description, and remaining lines are HTML content.
-- Shared responsive styles: `assets/site.css`.
-- Menu, comparison filters and enquiry builder: `assets/site.js`.
-- Contact recipient: `site.json`. `hello@liquidnat.com` is a configurable assumed mailbox; confirm it is provisioned before publishing.
-- Run `python3 build.py` after edits. Generated HTML contains the shared components, so it works on static hosting with no JavaScript fetch needed for navigation.
+## Check and deploy
 
-## Content and behaviour
+```sh
+python3 landing_page/build.py
+node --check landing_page/assets/site.js
+python3 deploy/landing/test_receiver.py
+python3 deploy/landing/verify.py
+```
 
-13 separate pages cover Home, Platform, Gateway, RADIUS, Manager, Solutions/migration, Comparisons, netElastic comparison, Resources/FAQ, About, Acquisition news, Contact and Privacy. A 404 fallback is also generated.
+`.github/workflows/landing.yml` builds and deploys qualifying site changes on `main` or the dedicated `landing` preview branch. Keep feature work separate and integrate main at active-work checkpoints. The receiver accepts only the named PHP entry points, two shared templates and allowlisted assets. It cannot publish arbitrary PHP paths, cPanel config, credentials or files under the demo subdomain.
 
-The acquisition statement is supplied by the project owner. Product architecture and evaluation content are based on `../goal.md` and `../README.md`. The public copy avoids development-status banners, invented capacities, fabricated customers, unsupported production guarantees and unverified feature-parity claims. The Manager illustration is labelled as illustrative.
-
-Competitor family names were checked against https://netelastic.com/products on 5 November 2026. Recheck dated competitor content before a future release. The comparison is a purchasing guide, not an assertion of identical shipping features.
-
-The contact form validates input and opens a prefilled email. It does not send or store an enquiry. A copyable fallback is provided. Connect a real endpoint if server delivery is required. No analytics, external fonts, cookies, browser storage or third-party script dependencies are included. Review hosting-specific privacy arrangements when deploying.
+See `../deploy/landing/README.md` for root-administered routing configuration, preservation and rollback details.

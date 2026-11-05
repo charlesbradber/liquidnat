@@ -1,7 +1,7 @@
 name: Deploy LiquidNAT landing site
 on:
   push:
-    branches: [main]
+    branches: [main, landing]
     paths:
       - 'landing_page/**'
       - 'deploy/landing/**'
@@ -14,14 +14,16 @@ concurrency:
   cancel-in-progress: false
 jobs:
   deploy:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/landing'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
-      - name: Build static landing site
+      - name: Install PHP CLI for template checks
+        run: sudo apt-get update -qq && sudo apt-get install -y php-cli
+      - name: Build and lint PHP landing site
         run: python3 landing_page/build.py
       - name: Validate and package deployment
         run: |

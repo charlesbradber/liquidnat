@@ -83,6 +83,7 @@ export type Workspace = {
   retention: number;
 };
 export type Action =
+  | { type: "create-profile"; name: string; down: number; up: number }
   | { type: "create"; name: string; username: string; profile: string }
   | { type: "profile"; id: string; profile: string }
   | { type: "addressing"; id: string; mode: AddressMode; staticIp?: string }
@@ -457,7 +458,46 @@ export function apply(
       throw new DemoError("INVALID_PROFILE", "Choose a valid service profile.");
     return p;
   };
-  if (action.type === "create") {
+  if (action.type === "create-profile") {
+    const name = action.name.trim();
+    if (!/^[a-zA-Z0-9 .+'-]{2,48}$/.test(name))
+      throw new DemoError(
+        "VALIDATION",
+        "Use a profile name with 2–48 letters, numbers or spaces.",
+      );
+    if (
+      ![action.down, action.up].every(
+        (v) => Number.isInteger(v) && v >= 1 && v <= 100000,
+      )
+    )
+      throw new DemoError(
+        "VALIDATION",
+        "Speeds must be whole numbers between 1 and 100,000 Mb/s.",
+      );
+    if (s.profiles.length >= 32)
+      throw new DemoError(
+        "CAPACITY",
+        "This workspace supports up to 32 service profiles.",
+      );
+    if (s.profiles.some((p) => p.name.toLowerCase() === name.toLowerCase()))
+      throw new DemoError("DUPLICATE", "That profile name is already in use.");
+    const created = {
+      id: `profile-${uid()}`,
+      name,
+      down: action.down,
+      up: action.up,
+      price: 0,
+      nat: "Per-subscriber IPv4 + IPv6",
+    };
+    s.profiles = [...s.profiles, created];
+    event(
+      s,
+      "Profiles",
+      "Service profile created",
+      `${name} · ${action.down}/${action.up} Mb/s · immutable demo policy. Existing subscribers unchanged.`,
+      now,
+    );
+  } else if (action.type === "create") {
     if (s.subscribers.length >= MAX_SUBSCRIBERS)
       throw new DemoError(
         "CAPACITY",
@@ -780,6 +820,11 @@ export function parseAction(value: unknown): Action {
     return a[key] as string;
   };
   const type = text("type", 32);
+  if (type === "create-profile") {
+    if (typeof a.down !== "number" || typeof a.up !== "number")
+      throw new DemoError("VALIDATION", "Speeds must be numbers.");
+    return { type, name: text("name", 48), down: a.down, up: a.up };
+  }
   if (type === "create")
     return {
       type,

@@ -1459,6 +1459,7 @@ export function App() {
               <div className="modal-actions">
                 <button
                   className="button primary"
+                  disabled={state.profiles.length >= 32}
                   onClick={() => {
                     setPlanName("");
                     setPlanDown("2500");

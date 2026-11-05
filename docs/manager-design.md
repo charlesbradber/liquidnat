@@ -1,0 +1,11 @@
+# Manager reference design
+
+The shared management frontend now follows the owner-supplied reference: charcoal workspace navigation, teal selection and primary actions, a compact breadcrumb/search header, bordered white panels, a four-card network summary, traffic alongside incidents, and full-width gateway and subscriber activity tables.
+
+`management/web/src/manager-theme.css` is imported by the application entry point, after base and search styles. It applies to every management screen and both existing data modes: browser-local simulation and the optional same-origin PHP simulator adapter. `Dashboard.tsx` receives the workspace, clock and existing action callbacks; it does not contain a separate backend or packet-engine controls. There is no second production GUI implementation in this repository to style independently. Production gateway/RADIUS integration remains separate platform work.
+
+Subscriber activity renders at most five rows, offers state and time filters, resets paging on filter changes, and recomputes time filtering as the application clock advances. Incident buttons open the selected subscriber’s diagnostic journey. Gateway actions open operations. Search, service-profile creation, addressing transitions, recovery, review dialogs and scenario/reset controls remain available.
+
+The chart uses fixed-size HTML labels around scalable SVG curves to avoid distorted axis text. Its latest simulated points match the displayed downstream/upstream totals. Online percentage is computed from the current dataset. All fixtures, health indicators and telemetry remain explicitly simulated; the redesign does not imply measured throughput or connected packet hardware.
+
+Validation: 30 model, diagnostic and DOM tests pass, including incident recovery reflected on the overview, bounded activity filtering/pagination, and the same overview through the PHP adapter. Production build, HTTP API regression and deployment boundary tests pass. Desktop visual review covered the overview and RADIUS screen; chart sizing and text distortion found during review were corrected. Mobile layout retains the existing navigation drawer and uses stacked panels with horizontally scrollable wide tables. Additional browser automation was stopped by the owner, so no mobile visual-review claim is made.

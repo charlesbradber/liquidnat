@@ -1,3 +1,4 @@
+import { Dashboard } from "./Dashboard";
 import { diagnose, diagnosticBundle } from "./diagnostics";
 import React, { useEffect, useRef, useState, useMemo } from "react";
 import { createRoot } from "react-dom/client";
@@ -76,6 +77,7 @@ import {
 } from "./simulator";
 import "./style.css";
 import "./search-addressing.css";
+import "./manager-theme.css";
 import { HttpDemoBackend } from "./backend";
 
 type Area =
@@ -487,72 +489,112 @@ export function App() {
   const minutes = Math.max(0, Math.ceil((state.expires - clock) / 60000));
 
   function TrafficChart() {
-    const xs = Array.from({ length: 49 }, (_, i) => i);
+    const xs = Array.from({ length: 73 }, (_, i) => i);
     const range =
       chartTime === "24 hours" ? 0.6 : chartTime === "15 min" ? 1.6 : 1;
-    const points = xs
-      .map(
-        (i) =>
-          `${40 + i * 12.9},${155 - (38 + Math.sin(i * 0.41 * range) * 18 + Math.cos(i * 0.93) * 9 + i * 0.9)}`,
-      )
-      .join(" ");
-    const upload = xs
-      .map(
-        (i) =>
-          `${40 + i * 12.9},${167 - (20 + Math.sin(i * 0.38) * 7 + i * 0.23)}`,
-      )
-      .join(" ");
+    const sample = (i: number) =>
+      Math.sin(i * 0.27 * range) * 0.65 + Math.cos(i * 0.61) * 0.2;
+    const downstream = xs.map((i) => [
+      (i / 72) * 640,
+      152 -
+        (Math.max(
+          1,
+          Math.min(115, throughput * 0.88 + (sample(i) - sample(72)) * 24),
+        ) /
+          120) *
+          144,
+    ]);
+    const upstream = xs.map((i) => [
+      (i / 72) * 640,
+      152 -
+        (Math.max(
+          1,
+          throughput * 0.12 + (Math.sin(i * 0.25) - Math.sin(72 * 0.25)) * 3,
+        ) /
+          120) *
+          144,
+    ]);
+    const curve = (points: number[][]) => {
+      let path = `M${points[0].join(",")}`;
+      for (let i = 1; i < points.length - 1; i++) {
+        const point = points[i],
+          next = points[i + 1];
+        path += ` Q${point.join(",")} ${(point[0] + next[0]) / 2},${(point[1] + next[1]) / 2}`;
+      }
+      return path + ` T${points[points.length - 1].join(",")}`;
+    };
+    const rangeMinutes =
+      chartTime === "24 hours" ? 1440 : chartTime === "15 min" ? 15 : 60;
     return (
-      <svg
+      <div
         className="traffic-chart"
-        viewBox="0 0 690 208"
         role="img"
         aria-label={`Simulated downstream and upstream traffic over ${chartTime}`}
       >
-        <defs>
-          <linearGradient id="fill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#13a99e" stopOpacity=".2" />
-            <stop offset="100%" stopColor="#13a99e" stopOpacity=".01" />
-          </linearGradient>
-        </defs>
-        {[0, 1, 2, 3, 4].map((i) => (
-          <g key={i}>
+        <div className="traffic-y-axis" aria-hidden="true">
+          {[120, 90, 60, 30, 0].map((value) => (
+            <span key={value}>{value}</span>
+          ))}
+        </div>
+        <svg
+          className="traffic-plot-svg"
+          viewBox="0 0 640 160"
+          preserveAspectRatio="none"
+          aria-hidden="true"
+        >
+          <defs>
+            <linearGradient id="traffic-fill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#00ad95" stopOpacity=".23" />
+              <stop offset="100%" stopColor="#00ad95" stopOpacity=".025" />
+            </linearGradient>
+          </defs>
+          {[0, 1, 2, 3, 4].map((i) => (
             <line
-              x1="40"
-              x2="674"
-              y1={20 + i * 38}
-              y2={20 + i * 38}
-              stroke="#edf0f3"
-              strokeDasharray="3 4"
+              key={i}
+              x1="0"
+              x2="640"
+              y1={8 + i * 36}
+              y2={8 + i * 36}
+              stroke="#e2e7ed"
+              strokeWidth="1"
+              vectorEffect="non-scaling-stroke"
             />
-            <text x="3" y={24 + i * 38}>
-              {120 - i * 30}G
-            </text>
-          </g>
-        ))}
-        <polygon points={`40,172 ${points} 660,172`} fill="url(#fill)" />
-        <polyline
-          points={points}
-          fill="none"
-          stroke="#119c90"
-          strokeWidth="2.5"
-          strokeLinejoin="round"
-        />
-        <polyline
-          points={upload}
-          fill="none"
-          stroke="#879ec0"
-          strokeWidth="2"
-          strokeLinejoin="round"
-        />
-        {["09:00", "09:10", "09:20", "09:30", "09:40", "09:50", "10:00"].map(
-          (x, i) => (
-            <text key={x} x={40 + i * 103} y="201">
-              {x}
-            </text>
-          ),
-        )}
-      </svg>
+          ))}
+          <path
+            d={`${curve(downstream)} L640,152 L0,152 Z`}
+            fill="url(#traffic-fill)"
+          />
+          <path
+            d={curve(downstream)}
+            fill="none"
+            stroke="#00ad95"
+            strokeWidth="2.5"
+            vectorEffect="non-scaling-stroke"
+          />
+          <path
+            d={curve(upstream)}
+            fill="none"
+            stroke="#279ed1"
+            strokeWidth="2"
+            vectorEffect="non-scaling-stroke"
+          />
+        </svg>
+        <div className="traffic-axis-unit" aria-hidden="true">
+          Gb/s
+        </div>
+        <div className="traffic-x-axis" aria-hidden="true">
+          {Array.from({ length: 7 }, (_, i) => (
+            <span key={i}>
+              {new Date(
+                chartClock.current - (6 - i) * rangeMinutes * 10000,
+              ).toLocaleTimeString("en-GB", {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </span>
+          ))}
+        </div>
+      </div>
     );
   }
   function EventList({
@@ -717,10 +759,11 @@ export function App() {
           <ChevronDown size={14} />
         </button>
         <p className="nav-label">WORKSPACE</p>
-        <nav>
+        <nav aria-label="Workspace navigation">
           {nav.slice(0, 6).map((n) => (
             <button
               key={n.id}
+              aria-current={area === n.id ? "page" : undefined}
               className={area === n.id ? "active" : ""}
               onClick={() => go(n.id)}
             >
@@ -735,6 +778,7 @@ export function App() {
           {nav.slice(6).map((n) => (
             <button
               key={n.id}
+              aria-current={area === n.id ? "page" : undefined}
               className={area === n.id ? "active" : ""}
               onClick={() => go(n.id)}
             >
@@ -793,7 +837,9 @@ export function App() {
             >
               <Menu size={21} />
             </button>
-            <span>Workspace</span>
+            <span>Workspaces</span>
+            <ChevronRight size={13} />
+            <span className="breadcrumb-workspace">ExampleNet</span>
             <ChevronRight size={13} />
             <strong>{nav.find((n) => n.id === area)?.label}</strong>
           </div>
@@ -1005,7 +1051,7 @@ export function App() {
                 {
                   {
                     overview:
-                      "A clear view of your network. A simpler way to run it.",
+                      "A clear view of your network, subscribers, gateways and operational health.",
                     subscribers:
                       "Manage access, investigate sessions, and keep your customers connected.",
                     profiles:
@@ -1073,270 +1119,24 @@ export function App() {
           </div>
 
           {area === "overview" && (
-            <>
-              <section className="metrics-grid">
-                <Metric
-                  label="Connected subscribers"
-                  value={online.toLocaleString()}
-                  unit={`/ ${state.subscribers.length}`}
-                  icon={Users}
-                  footer={
-                    <>
-                      <span className="positive">
-                        <ArrowUpRight size={13} />{" "}
-                        {state.completed.includes("first")
-                          ? "+1 new connection"
-                          : "97.7% online"}
-                      </span>
-                      <span>across 2 gateways</span>
-                    </>
-                  }
-                />
-                <Metric
-                  label="Total throughput"
-                  value={throughput.toFixed(2)}
-                  unit="Gb/s"
-                  icon={Activity}
-                  footer={
-                    <>
-                      <span className="positive">
-                        <ArrowDownLeft size={13} />{" "}
-                        {(throughput * 0.88).toFixed(2)} down
-                      </span>
-                      <span>
-                        <ArrowUpRight size={13} />{" "}
-                        {(throughput * 0.12).toFixed(2)} up
-                      </span>
-                    </>
-                  }
-                />
-                <Metric
-                  label="Gateway health"
-                  value="2"
-                  unit="/ 2 healthy"
-                  icon={Server}
-                  footer={
-                    <>
-                      <span className="positive">
-                        <i className="tiny-dot" /> Active / standby
-                      </span>
-                      <span>Simulated HA</span>
-                    </>
-                  }
-                />
-                <Metric
-                  label="Open incidents"
-                  value={String(issues.length)}
-                  icon={Shield}
-                  footer={
-                    <>
-                      <span
-                        className={issues.length ? "warning-text" : "positive"}
-                      >
-                        {issues.length ? "Needs your attention" : "All clear"}
-                      </span>
-                      <button
-                        className="text-link"
-                        onClick={() => go("diagnostics")}
-                      >
-                        Investigate <ArrowRight size={12} />
-                      </button>
-                    </>
-                  }
-                />
-              </section>
-              <div className="overview-middle">
-                <section className="panel traffic-panel">
-                  <div className="panel-heading">
-                    <div>
-                      <h2>
-                        Network traffic{" "}
-                        <span className="subtle-tag">SIMULATED</span>
-                      </h2>
-                      <p>Aggregate traffic across your gateways</p>
-                    </div>
-                    <div className="inline-controls">
-                      <button
-                        className="icon-button"
-                        aria-label={paused ? "Resume chart" : "Pause chart"}
-                        onClick={() => setPaused(!paused)}
-                      >
-                        {paused ? <Play size={15} /> : <Pause size={15} />}
-                      </button>
-                      <select
-                        aria-label="Traffic time range"
-                        value={chartTime}
-                        onChange={(e) => setChartTime(e.target.value)}
-                      >
-                        <option>15 min</option>
-                        <option>1 hour</option>
-                        <option>24 hours</option>
-                      </select>
-                    </div>
-                  </div>
-                  <div className="chart-key">
-                    <span>
-                      <i className="teal-dot" />
-                      Downstream{" "}
-                      <strong>{(throughput * 0.88).toFixed(2)} Gb/s</strong>
-                    </span>
-                    <span>
-                      <i className="blue-dot" />
-                      Upstream{" "}
-                      <strong>{(throughput * 0.12).toFixed(2)} Gb/s</strong>
-                    </span>
-                  </div>
-                  <TrafficChart />
-                  <div className="chart-footer">
-                    <span>
-                      <i className={`tiny-dot ${paused ? "grey" : ""}`} />
-                      {paused ? "Playback paused" : "Demo playback active"}
-                    </span>
-                    <span>Generated data · not a performance measurement</span>
-                  </div>
-                </section>
-                <section className="panel gateway-panel">
-                  <div className="panel-heading">
-                    <div>
-                      <h2>Gateway pair</h2>
-                      <p>London lab · active / standby</p>
-                    </div>
-                    <button
-                      className="icon-button"
-                      aria-label="Gateway operations"
-                      onClick={() => go("operations")}
-                    >
-                      <MoreHorizontal size={19} />
-                    </button>
-                  </div>
-                  {["gateway-01", "gateway-02"].map((node, i) => (
-                    <div className="gateway-card" key={node}>
-                      <div className="node-icon">
-                        <Server size={22} />
-                        <i />
-                      </div>
-                      <div className="node-info">
-                        <strong>{node}</strong>
-                        <span>LiquidNAT Gateway · {state.version}</span>
-                      </div>
-                      <Badge tone={state.active === node ? "green" : "grey"}>
-                        {state.active === node ? "Active" : "Standby"}
-                      </Badge>
-                      <div className="node-metrics">
-                        <span>
-                          CPU{" "}
-                          <strong>
-                            {state.active === node ? "24%" : "6%"}
-                          </strong>
-                          <b>
-                            <i
-                              style={{
-                                width: state.active === node ? "24%" : "6%",
-                              }}
-                            />
-                          </b>
-                        </span>
-                        <span>
-                          Memory{" "}
-                          <strong>
-                            {i === 0 ? "3.2" : "2.8"} <small>/ 16 GB</small>
-                          </strong>
-                          <b>
-                            <i style={{ width: "20%" }} />
-                          </b>
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                  <div className="replication">
-                    <ShieldCheck size={16} />
-                    <span>
-                      State replication <strong>In sync</strong>
-                    </span>
-                    <span>Simulated</span>
-                  </div>
-                  <button
-                    className="panel-footer-link"
-                    onClick={() => go("operations")}
-                  >
-                    View gateway operations <ArrowRight size={14} />
-                  </button>
-                </section>
-              </div>
-              <div className="overview-lower">
-                <section className="panel">
-                  <div className="panel-heading">
-                    <div>
-                      <h2>Recent activity</h2>
-                      <p>The latest events in your workspace</p>
-                    </div>
-                    <button
-                      className="text-link"
-                      onClick={() => {
-                        go("operations");
-                        setTab("events");
-                      }}
-                    >
-                      View all <ArrowRight size={13} />
-                    </button>
-                  </div>
-                  <EventList />
-                </section>
-                <section className="guide-card">
-                  <div className="guide-icon">
-                    <Waypoints size={23} />
-                  </div>
-                  <span className="eyebrow">GET HANDS-ON</span>
-                  <h2>Go beyond the dashboard.</h2>
-                  <p>
-                    Connect a subscriber. Follow an authentication failure.
-                    Practice a gateway failover.
-                  </p>
-                  <div className="guide-progress">
-                    <span>
-                      {state.completed.length} of 9 scenarios completed
-                    </span>
-                    <b>{Math.round((state.completed.length / 9) * 100)}%</b>
-                  </div>
-                  <div className="progress-track">
-                    <i
-                      style={{
-                        width: `${(state.completed.length / 9) * 100}%`,
-                      }}
-                    />
-                  </div>
-                  <button
-                    className="button"
-                    onClick={() =>
-                      setModal({
-                        kind: "tour",
-                        title: "Your network playground",
-                        description:
-                          "A guided tour of everyday network operations. Choose any scenario to begin.",
-                      })
-                    }
-                  >
-                    Start exploring <ArrowRight size={16} />
-                  </button>
-                  <small>About 5–10 minutes. Reset whenever you like.</small>
-                </section>
-              </div>
-              <section className="panel">
-                <div className="panel-heading">
-                  <div>
-                    <h2>Subscriber snapshot</h2>
-                    <p>Fictional services, ready to explore</p>
-                  </div>
-                  <button
-                    className="text-link"
-                    onClick={() => go("subscribers")}
-                  >
-                    All subscribers <ArrowRight size={13} />
-                  </button>
-                </div>
-                <SubscriberTable compact />
-              </section>
-            </>
+            <Dashboard
+              workspace={state}
+              now={clock}
+              throughput={throughput}
+              paused={paused}
+              chartTime={chartTime}
+              chart={<TrafficChart />}
+              onPause={() => setPaused(!paused)}
+              onRange={setChartTime}
+              onInspect={inspect}
+              onDiagnose={diagnostic}
+              onOperations={() => go("operations")}
+              onSubscribers={() => go("subscribers")}
+              onDiagnostics={() => go("diagnostics")}
+              onGuide={() =>
+                setModal({ kind: "tour", title: "Your network playground" })
+              }
+            />
           )}
 
           {area === "subscribers" && (

@@ -22,10 +22,7 @@ export function ProviderManagement({
   return (
     <section className="panel provider-management">
       <h2>{editing ? "Edit network provider" : "Add network provider"}</h2>
-      <p>
-        Organise fictional subscribers and service profiles by network provider.
-        All services remain simulated.
-      </p>
+      <p>Manage subscribers and service profiles by network provider.</p>
       <form
         className="provider-form"
         onSubmit={(e) => {
@@ -155,7 +152,7 @@ export function ProviderManagement({
     </section>
   );
 }
-export function ServiceProfileEditor({
+export function ProfileEditor({
   state,
   review,
 }: {
@@ -207,7 +204,7 @@ export function ServiceProfileEditor({
       >
         <div className="form-grid">
           <label>
-            Service profile name
+            Catalogue profile name
             <input
               required
               minLength={2}

@@ -270,7 +270,7 @@ describe("Isolated demo backend", () => {
       {
         type: "create",
         name: "Demo Test",
-        username: "new.test@example.net",
+        username: "new.test@liquidnet.net",
         profile: "home500",
       },
       s.revision,
@@ -302,7 +302,7 @@ describe("Isolated demo backend", () => {
     run({
       type: "create",
       name: "Example Subscriber",
-      username: "new.person@example.net",
+      username: "new.person@liquidnet.net",
       profile: "home500",
     });
     expect(s.subscribers[0].status).toBe("online");
@@ -327,13 +327,13 @@ describe("Isolated demo backend", () => {
     ).toBe(true);
     run({ type: "upgrade" });
     s = tick(s, now + 6001);
-    expect(s.version).toBe("0.2.1-demo");
+    expect(s.version).toBe("0.2.1");
     expect(s.backupAt).not.toBeNull();
     expect(lookup(s, "203.0.113.10", 40012, "TCP", now)).toHaveLength(1);
     run({ type: "mapping-viewed" });
     expect(s.completed).toHaveLength(9);
     run({ type: "rollback" });
-    expect(s.version).toBe("0.2.0-demo");
+    expect(s.version).toBe("0.2.0");
     expect(s.events.length).toBeGreaterThan(9);
   });
   it("rejects stale revisions, expired sessions and unknown targets without mutation", () => {
@@ -353,7 +353,7 @@ describe("Isolated demo backend", () => {
         {
           type: "create",
           name: "<script>",
-          username: "x@example.net",
+          username: "x@liquidnet.net",
           profile: "home500",
         },
         1,
@@ -366,7 +366,7 @@ describe("Isolated demo backend", () => {
         {
           type: "create",
           name: "Example Person",
-          username: "x@real.example",
+          username: "invalid-username",
           profile: "home500",
         },
         1,
@@ -379,7 +379,7 @@ describe("Isolated demo backend", () => {
         {
           type: "create",
           name: "Example Person",
-          username: "subscriber001@example.net",
+          username: "subscriber001@liquidnet.net",
           profile: "home500",
         },
         1,
@@ -404,7 +404,7 @@ describe("Isolated demo backend", () => {
         {
           type: "create",
           name: "Example Person",
-          username: "person@example.net",
+          username: "person@liquidnet.net",
           profile: "home500",
         },
         1,
@@ -454,7 +454,7 @@ describe("Isolated demo backend", () => {
       ),
     ).toThrow();
   });
-  it("resets corrupt or expired session storage and uses an in-memory fallback", () => {
+  it("resets corrupt storage and retains active browser session storage and uses an in-memory fallback", () => {
     const map = new Map<string, string>();
     const store = {
       getItem: (k: string) => map.get(k) || null,
@@ -469,7 +469,7 @@ describe("Isolated demo backend", () => {
     const a = load(store, now);
     expect(a.subscribers).toHaveLength(12864);
     const b = load(store, now + TTL + 1);
-    expect(b.id).not.toBe(a.id);
+    expect(b.id).toBe(a.id);
     const fail = {
       getItem: () => {
         throw Error();
@@ -665,7 +665,7 @@ describe("Network providers", () => {
       provider: "examplenet",
       status: "suspended",
     });
-    expect(migrated.providers[0].name).toBe("ExampleNet");
+    expect(migrated.providers[0].name).toBe("LiquidNet");
     old.subscriberChanges[0].provider = "missing";
     expect(() => unpack(old)).toThrow(/Invalid subscriber/);
   });

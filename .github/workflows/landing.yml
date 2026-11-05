@@ -1,0 +1,45 @@
+name: Deploy LiquidNAT landing site
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'landing_page/**'
+      - 'deploy/landing/**'
+      - '.github/workflows/landing.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: liquidnat-cpanel-landing
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Build static landing site
+        run: python3 landing_page/build.py
+      - name: Validate and package deployment
+        run: |
+          node --check landing_page/assets/site.js
+          python3 deploy/landing/test_receiver.py
+          python3 deploy/landing/verify.py
+          python3 deploy/landing/package.py --dist landing_page/dist --out "$RUNNER_TEMP/landing.tar.gz" --commit "$GITHUB_SHA"
+      - name: Deploy to master cPanel server
+        env:
+          DEPLOY_KEY: ${{ secrets.LANDING_DEPLOY_KEY }}
+          KNOWN_HOSTS: ${{ secrets.LANDING_KNOWN_HOSTS }}
+        run: |
+          umask 077
+          install -d -m 700 "$RUNNER_TEMP/landing-ssh"
+          trap 'rm -f "$RUNNER_TEMP/landing-ssh/key"' EXIT
+          printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/landing-ssh/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$RUNNER_TEMP/landing-ssh/known_hosts"
+          ssh -T -i "$RUNNER_TEMP/landing-ssh/key" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$RUNNER_TEMP/landing-ssh/known_hosts" -o ConnectTimeout=20 liquidnat@master.mywebsitepanel.com "deploy $GITHUB_SHA" < "$RUNNER_TEMP/landing.tar.gz"
+      - name: Verify public site and demo
+        run: |
+          python3 deploy/landing/verify.py --live --commit "$GITHUB_SHA"

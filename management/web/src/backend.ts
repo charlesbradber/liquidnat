@@ -1,4 +1,4 @@
-import { Action, Workspace } from "./simulator";
+import { Action, Workspace, unpack } from "./simulator";
 /** Same-origin simulator adapter. No configurable destinations or production controls. */
 export class HttpDemoBackend {
   private csrf = "";
@@ -11,7 +11,7 @@ export class HttpDemoBackend {
     if (!response.ok)
       throw Error(body.error?.message || "Demo API unavailable.");
     this.csrf = body.csrf;
-    return body.workspace;
+    return unpack(body.workspace);
   }
   async mutate(state: Workspace, action: Action | "reset"): Promise<Workspace> {
     const response = await fetch(
@@ -31,6 +31,6 @@ export class HttpDemoBackend {
     const body = await response.json();
     if (!response.ok)
       throw Error(body.error?.message || "Demo change rejected.");
-    return body.workspace;
+    return unpack(body.workspace);
   }
 }

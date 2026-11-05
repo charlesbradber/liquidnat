@@ -12,7 +12,23 @@ npm ci
 npm run dev
 ```
 
-Open **http://localhost:5173/**. No email or password required. Choose **Explore demo** to see all nine guided scenarios. Each browser session has independent fictional state, a two-hour lifetime, reset, and bounded fixtures (250 subscribers, 100 audit entries, 20 jobs). Session storage unavailable: the UI reports that changes will last in memory only. No analytics, remote fonts, third-party assets, or production credentials are used.
+Open **http://localhost:5173/**. No email or password required. Choose **Explore demo** to see all nine guided scenarios. Each browser session has independent fictional state, a two-hour lifetime, reset, and bounded fixtures (12,864 seeded subscribers, up to 15,000 total, 100 audit entries, 20 jobs and 20,000 mapping records). Session storage unavailable: the UI reports that changes will last in memory only. No analytics, remote fonts, third-party assets, or production credentials are used.
+
+## Larger network, global search, and IPv4 modes
+
+The overview shows roughly **86 Gb/s of simulated aggregate traffic**, with a 120 Gb/s graph scale. These are illustrative demo figures, not measured capacity of the real engine.
+
+The persistent top-bar search accepts name, RADIUS username, IPv4, IPv6 WAN address or delegated prefix, circuit, subscriber ID, and MAC address. MACs accept colon, hyphen, dotted or compact notation; IPv6 full-address searches normalize expanded notation. Suggestions show at most six matches; Enter or **View all matches** opens the paginated subscriber list. List pages contain ten rows and can filter independently by connection status and IPv4 mode. The diagnostic selector is bounded too; use global search to diagnose subscribers outside its short list.
+
+Subscriber details offer **Change IPv4 mode**:
+
+- **CGNAT:** shared IPv4, a subscriber-side 100.64.0.0/16 address and fictional tuple attribution.
+- **Direct IPv4:** automatically assigned routed lab IPv4, without NAT.
+- **Static IPv4:** a specific reserved routed lab IPv4, without NAT. Validation rejects invalid/unsafe demo addresses and duplicate assignments, including addresses reserved by suspended subscribers.
+
+Direct/static fixtures use reserved benchmark addresses within **198.18.0.0/15**, never real publicly routed customer addresses. Manual static allocation also permits RFC 5737 documentation ranges. Changes preview before/after mode and address, reconnect/flow impact, IPv6 retention and expected revision. Applying closes existing NAT mappings at an exclusive end timestamp, retains historical attribution, updates pool assignment counts, and records an audit event. Entering CGNAT requires capacity; expand the seeded pool first when full. **View NAT mappings** from a CGNAT subscriber opens that service’s current tuples. Direct/static services bypass NAT and have no active NAT mappings.
+
+Deterministic subscriber/mapping fixtures are generated locally; persistence and the PHP API transfer compact schema-v2 deltas rather than 12,000 full records. Stored v1 browser workspaces reset to the new fixtures on this demo upgrade; production data migrations are not involved. Edits, new subscribers, failover, and mapping closure survive compact round trips. The server-side subscriber endpoint uses the same search/mode/status filtering and returns at most 50 rows per request.
 
 The hosted version uses this browser simulator adapter and no production services. It is intentionally owner-private until sharing is explicitly changed.
 

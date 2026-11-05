@@ -70,9 +70,10 @@ try {
   $update=$db->prepare('UPDATE workspaces SET state=? WHERE token=?');$update->execute([json_encode($state,JSON_THROW_ON_ERROR),$token]);$db->exec('COMMIT');
   header('ETag: "'.$state['revision'].'"');
   if($path==='/demo/api/v1/subscribers'){
-   $query=mb_strtolower(substr((string)($_GET['q']??''),0,128));$offset=max(0,min(250,(int)($_GET['offset']??0)));$limit=max(1,min(50,(int)($_GET['limit']??10)));
-   $items=array_values(array_filter($state['subscribers'],static fn($s)=>$query===''||str_contains(mb_strtolower(implode(' ',[$s['name'],$s['username'],$s['circuit'],$s['ip'],$s['ipv6']])),$query)));
-   respond(200,['items'=>array_slice($items,$offset,$limit),'total'=>count($items),'offset'=>$offset,'limit'=>$limit,'revision'=>$state['revision'],'simulation'=>true]);
+   $query=is_string($_GET['q']??'')?substr($_GET['q']??'',0,128):'';$offset=max(0,min(15000,(int)($_GET['offset']??0)));$limit=max(1,min(50,(int)($_GET['limit']??10)));
+   $result=worker(['operation'=>'list','state'=>$state,'query'=>$query,'offset'=>$offset,'limit'=>$limit,'mode'=>$_GET['mode']??'all','status'=>$_GET['status']??'all']);
+   if(!($result['ok']??false))fail(503,'WORKER_FAILED','Cannot query demo subscribers.');
+   respond(200,[...$result['page'],'offset'=>$offset,'limit'=>$limit,'revision'=>$state['revision'],'simulation'=>true]);
   }
   respond(200,['workspace'=>$state,'csrf'=>$row['csrf'],'simulation'=>true,'capabilities'=>['simulator'=>true,'packet_engine'=>false,'radius'=>false,'remote_callbacks'=>false]]);
  }

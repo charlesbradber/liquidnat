@@ -2,6 +2,8 @@
 
 Scope source: goal.md §§7, 27–31, 38–41. Start with E01–E06; this is not approval of a production rollout. No milestone is complete merely because this ledger exists.
 
+**Owner priority update, 2026-11-05:** deliver the interactive web playground first, with underlying services alongside it. E16/E17/E24 now take priority over expanding the packet engine. The implemented simulator GUI and PHP API adapter are described in [demo.md](demo.md); the nine simulated scenarios do not complete the corresponding real protocol milestones. Commit tested increments and merge/push them into main. The full platform acceptance scope below remains intact.
+
 | ID | Component and supported behaviour | Failure semantics / schema | Acceptance and expected evidence | Status |
 |---|---|---|---|---|
 | E01 | Buyer discovery and first topology | Unknown buyer/hardware assumptions stay unratified | 10–15 interviews, 2–3 design partners, signed first profile | External prerequisite; not performed |

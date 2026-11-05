@@ -2,11 +2,21 @@
 
 Independent ISP packet-engine and control-plane development, following [goal.md](goal.md).
 
-**Development laboratory only.** No production, capacity, HA, subscriber, NAT, or standards-compliance claims. The first implementation targets E01–E06 and gate G1; the remaining platform remains on the roadmap. See [the implementation plan](docs/implementation-plan.md) for requirements, evidence, and external prerequisites.
+**Interactive demo and development laboratory.** No production, capacity, HA, subscriber, NAT, or standards-compliance claims. The current priority is the Manager web playground (§24), while the Gateway implementation continues underneath. See [the demo guide](docs/demo.md) and [implementation plan](docs/implementation-plan.md).
 
 The engine is independently authored C++20; DPDK provides I/O, never forwarding policy. The default lab uses two isolated PCAP virtual ports without touching host interfaces. No management listener is exposed.
 
-Product components: **LiquidNAT Gateway** (packet engine and access/control services), **LiquidNAT RADIUS** (managed FreeRADIUS integration), **LiquidNAT Manager** (PHP API and TypeScript administration). This first implementation develops the Gateway engine; RADIUS and Manager are not implemented.
+Product components: **LiquidNAT Gateway** (original packet-engine foundations), **LiquidNAT RADIUS** (planned managed FreeRADIUS integration), **LiquidNAT Manager** (interactive React/TypeScript GUI and isolated PHP simulator API). The GUI deliberately simulates protocol services; it does not operate the real engine yet.
+
+Start the web demo:
+
+```sh
+cd management/web
+npm ci
+npm run dev
+```
+
+Open http://localhost:5173/ and choose **Explore demo**. All nine seeded workflows are interactive. For the local PHP-backed version and tests, see [docs/demo.md](docs/demo.md).
 
 Inside Ubuntu 24.04 with the [recorded toolchain](packaging/dev/toolchain-lock.json):
 

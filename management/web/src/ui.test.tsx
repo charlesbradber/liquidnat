@@ -152,3 +152,92 @@ describe("Manager interactions", () => {
     expect(screen.getByText("2001:db8::/32")).toBeTruthy();
   });
 });
+
+it("adds a provider, builds its catalogue, and creates and transfers subscribers", () => {
+  const view = render(<App />);
+  const nav = (name: string) =>
+    fireEvent.click(
+      screen.getAllByRole("button", { name: new RegExp("^" + name) })[0],
+    );
+  const apply = () =>
+    fireEvent.click(screen.getByRole("button", { name: "Apply demo change" }));
+  nav("Network providers");
+  fireEvent.change(screen.getByLabelText("Provider name"), {
+    target: { value: "City Fibre" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Review new provider" }));
+  apply();
+  expect(screen.getByRole("button", { name: "Edit City Fibre" })).toBeTruthy();
+  nav("Subscribers");
+  fireEvent.click(screen.getByRole("button", { name: "Add subscriber" }));
+  const emptyProviderSelect = screen.getByLabelText(
+    "Network provider",
+  ) as HTMLSelectElement;
+  const emptyProviderId = Array.from(emptyProviderSelect.options).find(
+    (o) => o.text === "City Fibre",
+  )!.value;
+  fireEvent.change(emptyProviderSelect, { target: { value: emptyProviderId } });
+  expect(
+    (
+      screen.getByRole("button", {
+        name: /Review subscriber/,
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(true);
+  expect(
+    screen.getByRole("option", { name: /No service profiles/ }),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  nav("Service profiles");
+  fireEvent.change(screen.getByLabelText("Profile name"), {
+    target: { value: "City 200" },
+  });
+  const providerSelect = screen.getByLabelText(
+    "Profile network provider",
+  ) as HTMLSelectElement;
+  const providerId = Array.from(providerSelect.options).find(
+    (o) => o.text === "City Fibre",
+  )!.value;
+  fireEvent.change(providerSelect, { target: { value: providerId } });
+  fireEvent.click(
+    screen.getByRole("button", { name: "Review service profile" }),
+  );
+  apply();
+  nav("Subscribers");
+  fireEvent.click(screen.getByRole("button", { name: "Add subscriber" }));
+  fireEvent.change(screen.getByLabelText("Subscriber name"), {
+    target: { value: "Alex Morgan" },
+  });
+  fireEvent.change(screen.getByLabelText("Demo username"), {
+    target: { value: "city.alex" },
+  });
+  fireEvent.change(screen.getByLabelText("Network provider"), {
+    target: { value: providerId },
+  });
+  expect(
+    within(screen.getByLabelText("Service profile")).getAllByRole("option"),
+  ).toHaveLength(1);
+  expect(
+    within(screen.getByLabelText("Service profile")).getByRole("option")
+      .textContent,
+  ).toContain("City 200");
+  fireEvent.click(screen.getByRole("button", { name: /Review subscriber/ }));
+  apply();
+  fireEvent.change(screen.getByLabelText("Filter network provider"), {
+    target: { value: providerId },
+  });
+  expect(screen.getByText(/of 1 subscribers/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "View Alex Morgan" }));
+  fireEvent.click(screen.getByRole("button", { name: "Change profile" }));
+  fireEvent.change(screen.getByLabelText("Network provider"), {
+    target: { value: "examplenet" },
+  });
+  expect(screen.getAllByRole("radio")).toHaveLength(3);
+  fireEvent.click(screen.getByRole("button", { name: /Review change/ }));
+  apply();
+  expect(screen.getByText("No subscribers found")).toBeTruthy();
+  view.unmount();
+  render(<App />);
+  nav("Network providers");
+  expect(screen.getByRole("button", { name: "Edit City Fibre" })).toBeTruthy();
+});

@@ -73,7 +73,9 @@ import {
   subscriberIp,
   pack,
 } from "./simulator";
+import { ProviderManagement, ServiceProfileEditor } from "./ProviderManagement";
 import "./style.css";
+import "./providers.css";
 import "./search-addressing.css";
 import { HttpDemoBackend } from "./backend";
 
@@ -81,6 +83,7 @@ type Area =
   | "overview"
   | "subscribers"
   | "profiles"
+  | "providers"
   | "radius"
   | "network"
   | "cgnat"
@@ -108,6 +111,7 @@ type Modal = {
 const nav = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "subscribers", label: "Subscribers", icon: Users },
+  { id: "providers", label: "Network providers", icon: Globe2 },
   { id: "profiles", label: "Service profiles", icon: Gauge },
   { id: "radius", label: "RADIUS", icon: ShieldCheck },
   { id: "network", label: "Network", icon: Network },
@@ -234,8 +238,36 @@ export function App() {
   > | null>(null);
   const [createName, setCreateName] = useState("");
   const [createUser, setCreateUser] = useState("");
+  const [createProvider, setCreateProvider] = useState(state.providers[0].id);
+  const [profileProvider, setProfileProvider] = useState(state.providers[0].id);
+  const [providerFilter, setProviderFilter] = useState("all");
   const [createProfile, setCreateProfile] = useState("home500");
   const [profileChoice, setProfileChoice] = useState("home500");
+  useEffect(() => {
+    const provider = state.providers.some((p) => p.id === createProvider)
+      ? createProvider
+      : state.providers[0].id;
+    if (provider !== createProvider) setCreateProvider(provider);
+    if (
+      !state.profiles.some(
+        (p) => p.id === createProfile && p.provider === provider,
+      )
+    )
+      setCreateProfile(
+        state.profiles.find((p) => p.provider === provider)?.id || "",
+      );
+    if (
+      providerFilter !== "all" &&
+      !state.providers.some((p) => p.id === providerFilter)
+    )
+      setProviderFilter("all");
+  }, [
+    state.providers,
+    state.profiles,
+    createProvider,
+    createProfile,
+    providerFilter,
+  ]);
   const [formError, setFormError] = useState("");
   const [mfa, setMfa] = useState(state.mfa);
   const [retention, setRetention] = useState(state.retention);
@@ -379,10 +411,11 @@ export function App() {
             (filter === "issues"
               ? !["online", "suspended"].includes(s.status)
               : s.status === filter)) &&
+          (providerFilter === "all" || s.provider === providerFilter) &&
           matchesSubscriber(s, query) &&
           (modeFilter === "all" || s.addressMode === modeFilter),
       ),
-    [state, query, filter, modeFilter],
+    [state, query, filter, modeFilter, providerFilter],
   );
   const globalMatches = useMemo(
     () =>
@@ -433,6 +466,7 @@ export function App() {
     setModal({ kind: "subscriber", title: sub.name, sub });
   }
   function showProfile(sub: Subscriber) {
+    setProfileProvider(sub.provider);
     setProfileChoice(sub.profile);
     setModal({ kind: "profile", title: "Change service profile", sub });
   }
@@ -598,6 +632,7 @@ export function App() {
               <th>Subscriber</th>
               <th>Status</th>
               <th>IPv4 / mode</th>
+              <th>Network provider</th>
               <th>Service profile</th>
               {!compact && <th>Circuit / VLAN</th>}
               <th aria-label="Actions" />
@@ -638,6 +673,9 @@ export function App() {
                 <td className="mono">
                   {s.ip}
                   <small>{addressModeLabel[s.addressMode]}</small>
+                </td>
+                <td>
+                  {state.providers.find((p) => p.id === s.provider)?.name}
                 </td>
                 <td>
                   {profile(s).name}
@@ -1003,6 +1041,8 @@ export function App() {
                       "A clear view of your network. A simpler way to run it.",
                     subscribers:
                       "Manage access, investigate sessions, and keep your customers connected.",
+                    providers:
+                      "Manage network providers and their service catalogues.",
                     profiles:
                       "Consistent service policies, from authentication to the packet engine.",
                     radius:
@@ -1387,6 +1427,21 @@ export function App() {
                       <option value="static">Static IPv4</option>
                     </select>
                     <select
+                      aria-label="Filter network provider"
+                      value={providerFilter}
+                      onChange={(e) => {
+                        setProviderFilter(e.target.value);
+                        setPage(0);
+                      }}
+                    >
+                      <option value="all">All network providers</option>
+                      {state.providers.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                    <select
                       aria-label="Filter subscriber status"
                       value={filter}
                       onChange={(e) => setFilter(e.target.value)}
@@ -1444,6 +1499,14 @@ export function App() {
             </>
           )}
 
+          {area === "providers" && (
+            <ProviderManagement
+              key={state.revision}
+              state={state}
+              review={preview}
+            />
+          )}
+
           {area === "profiles" && (
             <>
               <div className="notice">
@@ -1451,13 +1514,24 @@ export function App() {
                 subscriber. Speed policies and CoA are simulated; no real
                 traffic is shaped.
               </div>
+              <ServiceProfileEditor
+                key={state.revision}
+                state={state}
+                review={preview}
+              />
               <div className="profile-grid">
                 {state.profiles.map((p) => (
                   <section className="panel profile-card" key={p.id}>
                     <div className="profile-symbol">
                       <Zap size={23} />
                     </div>
-                    <span className="eyebrow">RESIDENTIAL FIBRE</span>
+                    <span className="eyebrow">
+                      {
+                        state.providers.find(
+                          (provider) => provider.id === p.provider,
+                        )?.name
+                      }
+                    </span>
                     <h2>{p.name}</h2>
                     <div className="profile-speed">
                       {p.down}
@@ -2756,9 +2830,15 @@ export function App() {
                       name: createName,
                       username: `${createUser}@example.net`,
                       profile: createProfile,
+                      provider: createProvider,
                     },
                     "Review new subscriber",
                     [
+                      [
+                        "Network provider",
+                        state.providers.find((p) => p.id === createProvider)!
+                          .name,
+                      ],
                       ["Name", createName],
                       ["Username", `${createUser}@example.net`],
                       [
@@ -2802,16 +2882,44 @@ export function App() {
                     </div>
                   </label>
                   <label>
+                    Network provider
+                    <select
+                      value={createProvider}
+                      onChange={(e) => {
+                        setCreateProvider(e.target.value);
+                        setCreateProfile(
+                          state.profiles.find(
+                            (p) => p.provider === e.target.value,
+                          )?.id || "",
+                        );
+                      }}
+                    >
+                      {state.providers.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
                     Service profile
                     <select
+                      required
                       value={createProfile}
                       onChange={(e) => setCreateProfile(e.target.value)}
                     >
-                      {state.profiles.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name} · {p.down}/{p.up} Mb/s
+                      {!createProfile && (
+                        <option value="">
+                          No service profiles — add one first
                         </option>
-                      ))}
+                      )}
+                      {state.profiles
+                        .filter((p) => p.provider === createProvider)
+                        .map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name} · {p.down}/{p.up} Mb/s
+                          </option>
+                        ))}
                     </select>
                   </label>
                 </div>
@@ -2830,7 +2938,7 @@ export function App() {
                   >
                     Cancel
                   </button>
-                  <button className="button primary">
+                  <button className="button primary" disabled={!createProfile}>
                     Review subscriber <ArrowRight size={14} />
                   </button>
                 </div>
@@ -2842,28 +2950,56 @@ export function App() {
                   Choose a new package for {modal.sub.name}. Review the policy
                   transition before applying.
                 </p>
+                <label>
+                  Network provider
+                  <select
+                    value={profileProvider}
+                    onChange={(e) => {
+                      setProfileProvider(e.target.value);
+                      setProfileChoice(
+                        state.profiles.find(
+                          (p) => p.provider === e.target.value,
+                        )?.id || "",
+                      );
+                    }}
+                  >
+                    {state.providers.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {!profileChoice && (
+                  <p>
+                    This provider has no service profiles. Add a service profile
+                    first.
+                  </p>
+                )}
                 <div className="profile-options">
-                  {state.profiles.map((p) => (
-                    <label
-                      className={profileChoice === p.id ? "selected" : ""}
-                      key={p.id}
-                    >
-                      <input
-                        type="radio"
-                        name="profile"
-                        value={p.id}
-                        checked={profileChoice === p.id}
-                        onChange={() => setProfileChoice(p.id)}
-                      />
-                      <span>
-                        <strong>{p.name}</strong>
-                        <small>
-                          {p.down} Mb/s down · {p.up} Mb/s up
-                        </small>
-                      </span>
-                      <Gauge size={18} />
-                    </label>
-                  ))}
+                  {state.profiles
+                    .filter((p) => p.provider === profileProvider)
+                    .map((p) => (
+                      <label
+                        className={profileChoice === p.id ? "selected" : ""}
+                        key={p.id}
+                      >
+                        <input
+                          type="radio"
+                          name="profile"
+                          value={p.id}
+                          checked={profileChoice === p.id}
+                          onChange={() => setProfileChoice(p.id)}
+                        />
+                        <span>
+                          <strong>{p.name}</strong>
+                          <small>
+                            {p.down} Mb/s down · {p.up} Mb/s up
+                          </small>
+                        </span>
+                        <Gauge size={18} />
+                      </label>
+                    ))}
                 </div>
                 <div className="modal-actions">
                   <button
@@ -2874,17 +3010,26 @@ export function App() {
                   </button>
                   <button
                     className="button primary"
-                    disabled={profileChoice === modal.sub.profile}
+                    disabled={
+                      !profileChoice || profileChoice === modal.sub.profile
+                    }
                     onClick={() =>
                       preview(
                         {
                           type: "profile",
                           id: modal.sub!.id,
                           profile: profileChoice,
+                          provider: profileProvider,
                         },
                         "Review service profile change",
                         [
                           ["Subscriber", modal.sub!.name],
+                          [
+                            "Network provider",
+                            state.providers.find(
+                              (p) => p.id === profileProvider,
+                            )!.name,
+                          ],
                           [
                             "Profile",
                             `${profile(modal.sub!).name} → ${state.profiles.find((p) => p.id === profileChoice)!.name}`,
@@ -3140,6 +3285,16 @@ export function App() {
                       {modal.sub.status === "online"
                         ? state.active
                         : "Awaiting admission"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Network provider</dt>
+                    <dd>
+                      {
+                        state.providers.find(
+                          (p) => p.id === modal.sub!.provider,
+                        )?.name
+                      }
                     </dd>
                   </div>
                   <div>

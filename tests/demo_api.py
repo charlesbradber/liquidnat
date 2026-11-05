@@ -68,6 +68,20 @@ def main():
             assert next(sub for sub in static['workspace']['subscriberChanges'] if sub['id']=='sub-0001')['addressMode']=='static'
             code,duplicate=request(a,'/actions',{'type':'addressing','id':'sub-0002','mode':'static','staticIp':'192.0.2.50'}, {**headers,'If-Match':'2','Idempotency-Key':'test-duplicate-ip'});assert code==422 and duplicate['error']['code']=='ADDRESS_IN_USE'
             code,found=request(a,'/subscribers?q=192.0.2.50');assert code==200 and found['total']==1
+            # Provider/profile actions use the same isolated worker and revision rules.
+            def change(action, revision, key):
+                return request(a,'/actions',action,{**headers,'If-Match':str(revision),'Idempotency-Key':key})
+            code,provider=change({'type':'save-provider','name':'City Fibre'},2,'provider-create');assert code==200,provider
+            provider_id=provider['workspace']['providers'][-1]['id']
+            code,profile=change({'type':'save-profile','name':'City 200','provider':provider_id,'down':200,'up':50,'price':30},3,'provider-profile');assert code==200,profile
+            profile_id=profile['workspace']['profiles'][-1]['id']
+            code,bad=change({'type':'profile','id':'sub-0001','profile':profile_id,'provider':'examplenet'},4,'provider-mismatch');assert code==422 and bad['error']['code']=='PROVIDER_MISMATCH',bad
+            code,moved=change({'type':'profile','id':'sub-0001','profile':profile_id,'provider':provider_id},4,'provider-transfer');assert code==200,moved
+            assert next(sub for sub in moved['workspace']['subscriberChanges'] if sub['id']=='sub-0001')['provider']==provider_id
+            code,city_page=request(a,'/subscribers?provider='+provider_id);assert code==200 and city_page['total']==1,city_page
+            code,stored=request(a);assert code==200 and stored['workspace']['providers'][-1]['id']==provider_id
+            _,isolated=request(b);assert len(isolated['workspace']['providers'])==1 and len(isolated['workspace']['profiles'])==3
+            code,in_use=change({'type':'delete-provider','id':provider_id},5,'provider-in-use');assert code==422 and in_use['error']['code']=='IN_USE',in_use
             # Invalid requests count toward the per-session budget too.
             statuses=[request(a,'/actions',{'type':'backup'})[0] for _ in range(65)]
             assert 429 in statuses,'Rejected mutations bypassed the request rate budget'

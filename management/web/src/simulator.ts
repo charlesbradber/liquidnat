@@ -4,7 +4,9 @@ export type Status =
   | "auth-rejected"
   | "vlan-mismatch"
   | "pool-exhausted";
+export type Provider = { id: string; name: string };
 export type Profile = {
+  provider: string;
   id: string;
   name: string;
   down: number;
@@ -13,6 +15,7 @@ export type Profile = {
   nat: string;
 };
 export type Subscriber = {
+  provider: string;
   id: string;
   name: string;
   username: string;
@@ -71,6 +74,7 @@ export type Workspace = {
   version: string;
   subscribers: Subscriber[];
   profiles: Profile[];
+  providers: Provider[];
   events: Event[];
   jobs: Job[];
   mappings: Mapping[];
@@ -83,8 +87,26 @@ export type Workspace = {
   retention: number;
 };
 export type Action =
-  | { type: "create"; name: string; username: string; profile: string }
-  | { type: "profile"; id: string; profile: string }
+  | {
+      type: "create";
+      name: string;
+      username: string;
+      profile: string;
+      provider?: string;
+    }
+  | { type: "save-provider"; id?: string; name: string }
+  | { type: "delete-provider"; id: string }
+  | {
+      type: "save-profile";
+      id?: string;
+      name: string;
+      provider: string;
+      down: number;
+      up: number;
+      price: number;
+    }
+  | { type: "delete-profile"; id: string }
+  | { type: "profile"; id: string; profile: string; provider?: string }
   | { type: "addressing"; id: string; mode: AddressMode; staticIp?: string }
   | { type: "suspend" | "restore" | "fix-auth" | "fix-vlan"; id: string }
   | {
@@ -196,9 +218,11 @@ export function querySubscribers(
   limit = 10,
   status = "all",
   mode = "all",
+  provider = "all",
 ) {
   const matches = s.subscribers.filter(
     (sub) =>
+      (provider === "all" || sub.provider === provider) &&
       matchesSubscriber(sub, query) &&
       (status === "all" ||
         (status === "issues"
@@ -244,6 +268,7 @@ export function seed(now = Date.now(), id: string = uid()): Workspace {
   ];
   const profiles = [
     {
+      provider: "examplenet",
       id: "home100",
       name: "Essential 100",
       down: 100,
@@ -252,6 +277,7 @@ export function seed(now = Date.now(), id: string = uid()): Workspace {
       nat: "Per-subscriber IPv4 + IPv6",
     },
     {
+      provider: "examplenet",
       id: "home500",
       name: "Fibre 500",
       down: 500,
@@ -260,6 +286,7 @@ export function seed(now = Date.now(), id: string = uid()): Workspace {
       nat: "Per-subscriber IPv4 + IPv6",
     },
     {
+      provider: "examplenet",
       id: "home1000",
       name: "Gigabit",
       down: 1000,
@@ -271,6 +298,7 @@ export function seed(now = Date.now(), id: string = uid()): Workspace {
   const subscribers: Subscriber[] = Array.from(
     { length: DEMO_SUBSCRIBERS },
     (_, i) => ({
+      provider: "examplenet",
       id: `sub-${String(i + 1).padStart(4, "0")}`,
       name: `${first[i % 12]} ${last[Math.floor(i / 12) % 11]}`,
       username: `subscriber${String(i + 1).padStart(3, "0")}@example.net`,
@@ -318,6 +346,7 @@ export function seed(now = Date.now(), id: string = uid()): Workspace {
     version: "0.2.0-demo",
     subscribers,
     profiles,
+    providers: [{ id: "examplenet", name: "ExampleNet" }],
     events: [
       {
         id: "evt-3",
@@ -457,7 +486,144 @@ export function apply(
       throw new DemoError("INVALID_PROFILE", "Choose a valid service profile.");
     return p;
   };
-  if (action.type === "create") {
+  const requireProvider = (id: string) => {
+    if (!s.providers.some((p) => p.id === id))
+      throw new DemoError(
+        "INVALID_PROVIDER",
+        "Choose a valid network provider.",
+      );
+    return id;
+  };
+  const selectedProvider = (profileId: string, providerId?: string) => {
+    const p = profile(profileId);
+    const id = requireProvider(providerId ?? p.provider);
+    if (p.provider !== id)
+      throw new DemoError(
+        "PROVIDER_MISMATCH",
+        "Choose a service profile belonging to this network provider.",
+      );
+    return id;
+  };
+  const validName = (name: string) => {
+    if (
+      typeof name !== "string" ||
+      name.trim().length < 2 ||
+      name.trim().length > 64
+    )
+      throw new DemoError("VALIDATION", "Enter a name using 2–64 characters.");
+    return name.trim();
+  };
+  if (action.type === "save-provider") {
+    const name = validName(action.name);
+    if (action.id && !s.providers.some((p) => p.id === action.id))
+      throw new DemoError("NOT_FOUND", "Network provider not found.");
+    if (
+      s.providers.some(
+        (p) =>
+          p.id !== action.id && p.name.toLowerCase() === name.toLowerCase(),
+      )
+    )
+      throw new DemoError("DUPLICATE", "That network provider already exists.");
+    if (!action.id && s.providers.length >= 100)
+      throw new DemoError(
+        "CAPACITY",
+        "This demo supports up to 100 network providers.",
+      );
+    s.providers = action.id
+      ? s.providers.map((p) => (p.id === action.id ? { ...p, name } : p))
+      : [...s.providers, { id: uid(), name }];
+    event(
+      s,
+      "Providers",
+      action.id ? "Network provider updated" : "Network provider added",
+      name,
+      now,
+    );
+  } else if (action.type === "delete-provider") {
+    requireProvider(action.id);
+    if (
+      s.providers.length === 1 ||
+      s.profiles.some((p) => p.provider === action.id) ||
+      s.subscribers.some((p) => p.provider === action.id)
+    )
+      throw new DemoError(
+        "IN_USE",
+        "Keep at least one provider. Remove its profiles and move its subscribers before deleting it.",
+      );
+    const name = s.providers.find((p) => p.id === action.id)!.name;
+    s.providers = s.providers.filter((p) => p.id !== action.id);
+    event(s, "Providers", "Network provider deleted", name, now);
+  } else if (action.type === "save-profile") {
+    const name = validName(action.name);
+    requireProvider(action.provider);
+    if (
+      ![action.down, action.up].every(
+        (n) => Number.isFinite(n) && n > 0 && n <= 100000,
+      ) ||
+      !Number.isFinite(action.price) ||
+      action.price < 0 ||
+      action.price > 100000
+    )
+      throw new DemoError(
+        "VALIDATION",
+        "Enter speeds above 0 and up to 100,000 Mb/s, and a price from 0 to 100,000.",
+      );
+    if (action.id) {
+      const old = profile(action.id);
+      if (
+        old.provider !== action.provider &&
+        s.subscribers.some((sub) => sub.profile === old.id)
+      )
+        throw new DemoError(
+          "IN_USE",
+          "Move assigned subscribers before changing this profile's provider.",
+        );
+    } else if (s.profiles.length >= 300)
+      throw new DemoError(
+        "CAPACITY",
+        "This demo supports up to 300 service profiles.",
+      );
+    if (
+      s.profiles.some(
+        (p) =>
+          p.id !== action.id &&
+          p.provider === action.provider &&
+          p.name.toLowerCase() === name.toLowerCase(),
+      )
+    )
+      throw new DemoError(
+        "DUPLICATE",
+        "That service profile already exists for this provider.",
+      );
+    const saved: Profile = {
+      id: action.id || uid(),
+      name,
+      provider: action.provider,
+      down: action.down,
+      up: action.up,
+      price: action.price,
+      nat: "Per-subscriber IPv4 + IPv6",
+    };
+    s.profiles = action.id
+      ? s.profiles.map((p) => (p.id === action.id ? saved : p))
+      : [...s.profiles, saved];
+    event(
+      s,
+      "Profiles",
+      action.id ? "Service profile updated" : "Service profile added",
+      name,
+      now,
+    );
+  } else if (action.type === "delete-profile") {
+    const p = profile(action.id);
+    if (s.subscribers.some((sub) => sub.profile === p.id))
+      throw new DemoError(
+        "IN_USE",
+        "Move assigned subscribers before deleting this service profile.",
+      );
+    s.profiles = s.profiles.filter((item) => item.id !== p.id);
+    event(s, "Profiles", "Service profile deleted", p.name, now);
+  } else if (action.type === "create") {
     if (s.subscribers.length >= MAX_SUBSCRIBERS)
       throw new DemoError(
         "CAPACITY",
@@ -479,7 +645,7 @@ export function apply(
       )
     )
       throw new DemoError("DUPLICATE", "That username is already in use.");
-    profile(action.profile);
+    const provider = selectedProvider(action.profile, action.provider);
     const i = s.subscribers.length + 1;
     s.subscribers.unshift({
       id: `sub-${String(i).padStart(4, "0")}`,
@@ -491,6 +657,7 @@ export function apply(
       ipv6Address: `2001:db8:ffff:${i.toString(16)}::2`,
       mac: subscriberMac(i - 1),
       addressMode: "direct",
+      provider,
       profile: action.profile,
       status: "online",
       vlan: 200,
@@ -589,13 +756,20 @@ export function apply(
   } else if (action.type === "profile") {
     const sub = find(action.id),
       p = profile(action.profile);
+    const previousProvider = s.providers.find(
+      (provider) => provider.id === sub.provider,
+    )!.name;
+    sub.provider = selectedProvider(action.profile, action.provider);
+    const nextProvider = s.providers.find(
+      (provider) => provider.id === sub.provider,
+    )!.name;
     sub.profile = p.id;
     complete(s, "package");
     event(
       s,
       "Policy",
       "Service profile applied",
-      `${sub.name} → ${p.name} (${p.down}/${p.up} Mb/s). Simulated CoA acknowledged; session retained.`,
+      `${sub.name} → ${p.name} (${p.down}/${p.up} Mb/s) · ${previousProvider} → ${nextProvider}. Simulated CoA acknowledged; session retained.`,
       now,
     );
   } else if (
@@ -786,9 +960,40 @@ export function parseAction(value: unknown): Action {
       name: text("name"),
       username: text("username", 64),
       profile: text("profile"),
+      ...(a.provider !== undefined ? { provider: text("provider") } : {}),
     };
   if (type === "profile")
-    return { type, id: text("id"), profile: text("profile") };
+    return {
+      type,
+      id: text("id"),
+      profile: text("profile"),
+      ...(a.provider !== undefined ? { provider: text("provider") } : {}),
+    };
+  if (type === "save-provider")
+    return {
+      type,
+      name: text("name"),
+      ...(a.id !== undefined ? { id: text("id") } : {}),
+    };
+  if (type === "delete-provider" || type === "delete-profile")
+    return { type, id: text("id") };
+  if (type === "save-profile") {
+    if (
+      ![a.down, a.up, a.price].every(
+        (n) => typeof n === "number" && Number.isFinite(n),
+      )
+    )
+      throw new DemoError("VALIDATION", "Invalid service profile values.");
+    return {
+      type,
+      name: text("name"),
+      provider: text("provider"),
+      down: a.down as number,
+      up: a.up as number,
+      price: a.price as number,
+      ...(a.id !== undefined ? { id: text("id") } : {}),
+    };
+  }
   if (type === "addressing") {
     const mode = text("mode");
     if (!["cgnat", "direct", "static"].includes(mode))
@@ -929,6 +1134,40 @@ export function unpack(value: PackedWorkspace): Workspace {
   )
     throw new DemoError("VALIDATION", "Invalid stored workspace.");
   const base = seed(value.created, value.id);
+  value = {
+    ...value,
+    providers: value.providers ?? base.providers,
+    profiles: value.profiles.map((p) => ({
+      ...p,
+      provider: p.provider ?? "examplenet",
+    })),
+    subscriberChanges: value.subscriberChanges.map((sub) => ({
+      ...sub,
+      provider: sub.provider ?? "examplenet",
+    })),
+  };
+  if (
+    !Array.isArray(value.providers) ||
+    value.providers.length < 1 ||
+    value.providers.length > 100 ||
+    value.profiles.length > 300 ||
+    new Set(value.providers.map((p) => p.id)).size !== value.providers.length ||
+    new Set(value.profiles.map((p) => p.id)).size !== value.profiles.length ||
+    value.providers.some(
+      (p) =>
+        typeof p.id !== "string" ||
+        typeof p.name !== "string" ||
+        p.name.trim().length < 2 ||
+        p.name.length > 64,
+    ) ||
+    value.profiles.some(
+      (p) => !value.providers.some((provider) => provider.id === p.provider),
+    )
+  )
+    throw new DemoError(
+      "VALIDATION",
+      "Invalid provider or service profile state.",
+    );
   const changes = new Map(value.subscriberChanges.map((sub) => [sub.id, sub]));
   const known = new Set(base.subscribers.map((sub) => sub.id));
   const subscribers = [
@@ -939,6 +1178,9 @@ export function unpack(value: PackedWorkspace): Workspace {
     subscribers.length > MAX_SUBSCRIBERS ||
     subscribers.some(
       (sub) =>
+        !value.profiles.some(
+          (p) => p.id === sub.profile && p.provider === sub.provider,
+        ) ||
         typeof sub.name !== "string" ||
         typeof sub.mac !== "string" ||
         typeof sub.ipv6Address !== "string" ||

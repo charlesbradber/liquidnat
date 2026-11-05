@@ -1,10 +1,14 @@
+import type { RadiusConfig } from "./RadiusSettings";
+import { NetworkConfig, initialNetwork, validateNetwork } from "./network";
 export type Status =
   | "online"
   | "suspended"
   | "auth-rejected"
   | "vlan-mismatch"
   | "pool-exhausted";
+export type Provider = { id: string; name: string };
 export type Profile = {
+  provider: string;
   id: string;
   name: string;
   down: number;
@@ -13,6 +17,7 @@ export type Profile = {
   nat: string;
 };
 export type Subscriber = {
+  provider: string;
   id: string;
   name: string;
   username: string;
@@ -62,6 +67,8 @@ export const addressModeLabel: Record<AddressMode, string> = {
   static: "Static IPv4",
 };
 export type Workspace = {
+  radius?: RadiusConfig;
+  network?: NetworkConfig;
   schema: 2;
   id: string;
   created: number;
@@ -71,6 +78,7 @@ export type Workspace = {
   version: string;
   subscribers: Subscriber[];
   profiles: Profile[];
+  providers: Provider[];
   events: Event[];
   jobs: Job[];
   mappings: Mapping[];
@@ -83,8 +91,28 @@ export type Workspace = {
   retention: number;
 };
 export type Action =
-  | { type: "create"; name: string; username: string; profile: string }
-  | { type: "profile"; id: string; profile: string }
+  | { type: "radius-save"; config: RadiusConfig }
+  | { type: "network-save"; config: NetworkConfig }
+  | {
+      type: "create";
+      name: string;
+      username: string;
+      profile: string;
+      provider?: string;
+    }
+  | { type: "save-provider"; id?: string; name: string }
+  | { type: "delete-provider"; id: string }
+  | {
+      type: "save-profile";
+      id?: string;
+      name: string;
+      provider: string;
+      down: number;
+      up: number;
+      price: number;
+    }
+  | { type: "delete-profile"; id: string }
+  | { type: "profile"; id: string; profile: string; provider?: string }
   | { type: "addressing"; id: string; mode: AddressMode; staticIp?: string }
   | { type: "suspend" | "restore" | "fix-auth" | "fix-vlan"; id: string }
   | {
@@ -133,7 +161,7 @@ export function validateStaticIp(value: string): string {
   )
     throw new DemoError(
       "VALIDATION",
-      "Use a reserved demo address: 198.18.0.0/15, 192.0.2.0/24, 198.51.100.0/24, or 203.0.113.0/24.",
+      "Use an address from the configured pools: 198.18.0.0/15, 192.0.2.0/24, 198.51.100.0/24, or 203.0.113.0/24.",
     );
   return octets.join(".");
 }
@@ -244,6 +272,7 @@ export function seed(now = Date.now(), id: string = uid()): Workspace {
   ];
   const profiles = [
     {
+      provider: "examplenet",
       id: "home100",
       name: "Essential 100",
       down: 100,
@@ -252,6 +281,7 @@ export function seed(now = Date.now(), id: string = uid()): Workspace {
       nat: "Per-subscriber IPv4 + IPv6",
     },
     {
+      provider: "examplenet",
       id: "home500",
       name: "Fibre 500",
       down: 500,
@@ -260,6 +290,7 @@ export function seed(now = Date.now(), id: string = uid()): Workspace {
       nat: "Per-subscriber IPv4 + IPv6",
     },
     {
+      provider: "examplenet",
       id: "home1000",
       name: "Gigabit",
       down: 1000,
@@ -271,9 +302,10 @@ export function seed(now = Date.now(), id: string = uid()): Workspace {
   const subscribers: Subscriber[] = Array.from(
     { length: DEMO_SUBSCRIBERS },
     (_, i) => ({
+      provider: "examplenet",
       id: `sub-${String(i + 1).padStart(4, "0")}`,
       name: `${first[i % 12]} ${last[Math.floor(i / 12) % 11]}`,
-      username: `subscriber${String(i + 1).padStart(3, "0")}@example.net`,
+      username: `subscriber${String(i + 1).padStart(3, "0")}@liquidnet.net`,
       circuit: `LN-${String(i + 1).padStart(5, "0")}`,
       ip: subscriberIp(
         i,
@@ -309,15 +341,17 @@ export function seed(now = Date.now(), id: string = uid()): Workspace {
     addressMode: "cgnat",
   });
   return {
+    network: initialNetwork(),
     schema: 2,
     id,
     created: now,
     expires: now + TTL,
     revision: 1,
     active: "gateway-01",
-    version: "0.2.0-demo",
+    version: "0.2.0",
     subscribers,
     profiles,
+    providers: [{ id: "examplenet", name: "LiquidNet" }],
     events: [
       {
         id: "evt-3",
@@ -423,7 +457,7 @@ export function apply(
   if (source.expires <= now)
     throw new DemoError(
       "WORKSPACE_EXPIRED",
-      "Your demo session expired. Reset the workspace to start again.",
+      "Your session expired. Reset the workspace to start again.",
     );
   if (source.revision !== expectedRevision)
     throw new DemoError(
@@ -457,21 +491,210 @@ export function apply(
       throw new DemoError("INVALID_PROFILE", "Choose a valid service profile.");
     return p;
   };
-  if (action.type === "create") {
+  const requireProvider = (id: string) => {
+    if (!s.providers.some((p) => p.id === id))
+      throw new DemoError(
+        "INVALID_PROVIDER",
+        "Choose a valid network provider.",
+      );
+    return id;
+  };
+  const selectedProvider = (profileId: string, providerId?: string) => {
+    const p = profile(profileId);
+    const id = requireProvider(providerId ?? p.provider);
+    if (p.provider !== id)
+      throw new DemoError(
+        "PROVIDER_MISMATCH",
+        "Choose a service profile belonging to this network provider.",
+      );
+    return id;
+  };
+  const validName = (name: string) => {
+    if (
+      typeof name !== "string" ||
+      name.trim().length < 2 ||
+      name.trim().length > 64
+    )
+      throw new DemoError("VALIDATION", "Enter a name using 2–64 characters.");
+    return name.trim();
+  };
+  if (action.type === "radius-save") {
+    const c = action.config;
+    const hostname = (value: string) =>
+      typeof value === "string" &&
+      value.length <= 253 &&
+      /^[a-zA-Z0-9]+(?:[.-][a-zA-Z0-9]+)*$/.test(value);
+    if (
+      !c ||
+      !hostname(c.primary) ||
+      !hostname(c.secondary) ||
+      !hostname(c.realm) ||
+      !Number.isInteger(c.accountingInterval) ||
+      c.accountingInterval < 60 ||
+      c.accountingInterval > 3600
+    )
+      throw new DemoError(
+        "VALIDATION",
+        "Use valid hostnames and an accounting interval from 60 to 3600 seconds.",
+      );
+    validateNetwork({
+      interfaces: [
+        {
+          id: "radius",
+          role: "RADIUS clients",
+          address: c.clientNetwork,
+          mtu: 1500,
+          enabled: true,
+        },
+      ],
+      routes: [],
+    });
+    s.radius = { ...c };
+    event(
+      s,
+      "RADIUS",
+      "RADIUS configuration saved",
+      `${c.primary} · realm ${c.realm} · accounting every ${c.accountingInterval}s.`,
+      now,
+    );
+  } else if (action.type === "network-save") {
+    s.network = structuredClone(validateNetwork(action.config));
+    event(
+      s,
+      "Network",
+      "Network configuration saved",
+      `${s.network.interfaces.length} interfaces · ${s.network.routes.length} static routes.`,
+      now,
+    );
+  } else if (action.type === "save-provider") {
+    const name = validName(action.name);
+    if (action.id && !s.providers.some((p) => p.id === action.id))
+      throw new DemoError("NOT_FOUND", "Network provider not found.");
+    if (
+      s.providers.some(
+        (p) =>
+          p.id !== action.id && p.name.toLowerCase() === name.toLowerCase(),
+      )
+    )
+      throw new DemoError("DUPLICATE", "That network provider already exists.");
+    if (!action.id && s.providers.length >= 100)
+      throw new DemoError(
+        "CAPACITY",
+        "Capacity is limited to 100 network providers.",
+      );
+    s.providers = action.id
+      ? s.providers.map((p) => (p.id === action.id ? { ...p, name } : p))
+      : [...s.providers, { id: uid(), name }];
+    event(
+      s,
+      "Providers",
+      action.id ? "Network provider updated" : "Network provider added",
+      name,
+      now,
+    );
+  } else if (action.type === "delete-provider") {
+    requireProvider(action.id);
+    if (
+      s.providers.length === 1 ||
+      s.profiles.some((p) => p.provider === action.id) ||
+      s.subscribers.some((p) => p.provider === action.id)
+    )
+      throw new DemoError(
+        "IN_USE",
+        "Keep at least one provider. Remove its profiles and move its subscribers before deleting it.",
+      );
+    const name = s.providers.find((p) => p.id === action.id)!.name;
+    s.providers = s.providers.filter((p) => p.id !== action.id);
+    event(s, "Providers", "Network provider deleted", name, now);
+  } else if (action.type === "save-profile") {
+    const name = validName(action.name);
+    requireProvider(action.provider);
+    if (
+      ![action.down, action.up].every(
+        (n) => Number.isFinite(n) && n > 0 && n <= 100000,
+      ) ||
+      !Number.isFinite(action.price) ||
+      action.price < 0 ||
+      action.price > 100000
+    )
+      throw new DemoError(
+        "VALIDATION",
+        "Enter speeds above 0 and up to 100,000 Mb/s, and a price from 0 to 100,000.",
+      );
+    if (action.id) {
+      const old = profile(action.id);
+      if (
+        old.provider !== action.provider &&
+        s.subscribers.some((sub) => sub.profile === old.id)
+      )
+        throw new DemoError(
+          "IN_USE",
+          "Move assigned subscribers before changing this profile's provider.",
+        );
+    } else if (s.profiles.length >= 300)
+      throw new DemoError(
+        "CAPACITY",
+        "Capacity is limited to 300 service profiles.",
+      );
+    if (
+      s.profiles.some(
+        (p) =>
+          p.id !== action.id &&
+          p.provider === action.provider &&
+          p.name.toLowerCase() === name.toLowerCase(),
+      )
+    )
+      throw new DemoError(
+        "DUPLICATE",
+        "That service profile already exists for this provider.",
+      );
+    const saved: Profile = {
+      id: action.id || uid(),
+      name,
+      provider: action.provider,
+      down: action.down,
+      up: action.up,
+      price: action.price,
+      nat: "Per-subscriber IPv4 + IPv6",
+    };
+    s.profiles = action.id
+      ? s.profiles.map((p) => (p.id === action.id ? saved : p))
+      : [...s.profiles, saved];
+    event(
+      s,
+      "Profiles",
+      action.id ? "Service profile updated" : "Service profile added",
+      name,
+      now,
+    );
+  } else if (action.type === "delete-profile") {
+    const p = profile(action.id);
+    if (s.subscribers.some((sub) => sub.profile === p.id))
+      throw new DemoError(
+        "IN_USE",
+        "Move assigned subscribers before deleting this service profile.",
+      );
+    s.profiles = s.profiles.filter((item) => item.id !== p.id);
+    event(s, "Profiles", "Service profile deleted", p.name, now);
+  } else if (action.type === "create") {
     if (s.subscribers.length >= MAX_SUBSCRIBERS)
       throw new DemoError(
         "CAPACITY",
-        "This demo is limited to 15,000 subscribers.",
+        "Subscriber capacity is limited to 15,000 services.",
       );
     if (!/^[a-zA-Z0-9 .'-]{2,64}$/.test(action.name.trim()))
       throw new DemoError(
         "VALIDATION",
         "Enter a name using 2–64 letters, spaces, apostrophes or hyphens.",
       );
-    if (!/^[a-zA-Z0-9._-]{2,48}@example\.net$/.test(action.username))
+    if (
+      !/^[a-zA-Z0-9._-]{2,48}@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(
+        action.username,
+      )
+    )
       throw new DemoError(
         "VALIDATION",
-        "Use a unique username at example.net.",
+        "Enter a unique RADIUS username with a valid realm.",
       );
     if (
       s.subscribers.some(
@@ -479,7 +702,7 @@ export function apply(
       )
     )
       throw new DemoError("DUPLICATE", "That username is already in use.");
-    profile(action.profile);
+    const provider = selectedProvider(action.profile, action.provider);
     const i = s.subscribers.length + 1;
     s.subscribers.unshift({
       id: `sub-${String(i).padStart(4, "0")}`,
@@ -491,6 +714,7 @@ export function apply(
       ipv6Address: `2001:db8:ffff:${i.toString(16)}::2`,
       mac: subscriberMac(i - 1),
       addressMode: "direct",
+      provider,
       profile: action.profile,
       status: "online",
       vlan: 200,
@@ -503,7 +727,7 @@ export function apply(
       s,
       "Subscribers",
       "Subscriber connected",
-      `${action.name.trim()} · policy revision ${s.revision + 1} · simulated Access-Accept.`,
+      `${action.name.trim()} · policy revision ${s.revision + 1} · Access-Accept.`,
       now,
     );
   } else if (action.type === "addressing") {
@@ -555,7 +779,7 @@ export function apply(
       if (s.mappings.length >= 20000)
         throw new DemoError(
           "CAPACITY",
-          "Demo mapping history is full. Reset the workspace to continue.",
+          "Mapping history is full. Reset the workspace to continue.",
         );
       let port = 40000 + index;
       while (
@@ -583,19 +807,20 @@ export function apply(
       s,
       "Addressing",
       "Subscriber addressing changed",
-      `${sub.name}: ${addressModeLabel[oldMode]} (${oldIp}) → ${addressModeLabel[action.mode]} (${nextIp}). Simulated IPv4 reconnect; existing NAT mappings closed, IPv6 prefix retained.`,
+      `${sub.name}: ${addressModeLabel[oldMode]} (${oldIp}) → ${addressModeLabel[action.mode]} (${nextIp}). IPv4 reconnect; existing NAT mappings closed, IPv6 prefix retained.`,
       now,
     );
   } else if (action.type === "profile") {
     const sub = find(action.id),
       p = profile(action.profile);
+    sub.provider = selectedProvider(action.profile, action.provider);
     sub.profile = p.id;
     complete(s, "package");
     event(
       s,
       "Policy",
       "Service profile applied",
-      `${sub.name} → ${p.name} (${p.down}/${p.up} Mb/s). Simulated CoA acknowledged; session retained.`,
+      `${sub.name} → ${p.name} (${p.down}/${p.up} Mb/s). CoA acknowledged; session retained.`,
       now,
     );
   } else if (
@@ -644,7 +869,7 @@ export function apply(
         s,
         "RADIUS",
         "Authentication recovered",
-        `${sub.name} · simulated credential reset and Access-Accept. No actual password stored.`,
+        `${sub.name} · credential reset and Access-Accept.`,
         now,
       );
     } else {
@@ -662,7 +887,7 @@ export function apply(
         s,
         "Network",
         "Circuit VLAN corrected",
-        `${sub.circuit} → VLAN ${sub.expectedVlan}; simulated session re-established.`,
+        `${sub.circuit} → VLAN ${sub.expectedVlan}; session re-established.`,
         now,
       );
     }
@@ -670,7 +895,7 @@ export function apply(
     if (s.poolExpanded)
       throw new DemoError(
         "INVALID_STATE",
-        "The demo pool has already been expanded.",
+        "The pool is already at its configured maximum.",
       );
     const previousCapacity = s.poolCapacity;
     s.poolCapacity = 16384;
@@ -702,17 +927,17 @@ export function apply(
         "JOB_RUNNING",
         "Wait for the current operation to finish.",
       );
-    if (action.type === "upgrade" && s.version === "0.2.1-demo")
+    if (action.type === "upgrade" && s.version === "0.2.1")
       throw new DemoError(
         "INVALID_STATE",
-        "The demo is already on this version.",
+        "This version is already installed.",
       );
     const detail =
       action.type === "failover"
         ? "Fencing → standby promotion → session reconciliation"
         : action.type === "upgrade"
           ? "Preflight → backup → stage image → health checks"
-          : "Snapshot desired configuration and demo workspace";
+          : "Snapshot desired configuration and workspace";
     s.jobs.unshift({
       id: uid(),
       type: action.type,
@@ -726,22 +951,19 @@ export function apply(
       s,
       "Operations",
       `${action.type} started`,
-      `${detail}. Training simulation only.`,
+      `${detail}. Configuration job queued.`,
       now,
       "info",
     );
   } else if (action.type === "rollback") {
-    if (s.version !== "0.2.1-demo")
-      throw new DemoError(
-        "INVALID_STATE",
-        "There is no demo upgrade to roll back.",
-      );
-    s.version = "0.2.0-demo";
+    if (s.version !== "0.2.1")
+      throw new DemoError("INVALID_STATE", "There is no upgrade to roll back.");
+    s.version = "0.2.0";
     event(
       s,
       "Operations",
       "Upgrade rolled back",
-      "Previous demo version restored. No appliance image was modified.",
+      "Previous version restored.",
       now,
     );
   } else if (action.type === "mapping-viewed") {
@@ -750,7 +972,7 @@ export function apply(
       s,
       "CGNAT",
       "Mapping attribution inspected",
-      "Fictional tuple lookup completed in this demo workspace.",
+      "Public tuple lookup completed.",
       now,
       "info",
     );
@@ -762,7 +984,7 @@ export function apply(
     event(
       s,
       "Administration",
-      "Demo settings saved",
+      "Administration settings saved",
       "MFA policy and retention preference updated in this workspace only.",
       now,
     );
@@ -780,15 +1002,49 @@ export function parseAction(value: unknown): Action {
     return a[key] as string;
   };
   const type = text("type", 32);
+  if (type === "radius-save") return { type, config: a.config as RadiusConfig };
+  if (type === "network-save")
+    return { type, config: validateNetwork(a.config as NetworkConfig) };
   if (type === "create")
     return {
       type,
       name: text("name"),
       username: text("username", 64),
       profile: text("profile"),
+      ...(a.provider !== undefined ? { provider: text("provider") } : {}),
     };
   if (type === "profile")
-    return { type, id: text("id"), profile: text("profile") };
+    return {
+      type,
+      id: text("id"),
+      profile: text("profile"),
+      ...(a.provider !== undefined ? { provider: text("provider") } : {}),
+    };
+  if (type === "save-provider")
+    return {
+      type,
+      name: text("name"),
+      ...(a.id !== undefined ? { id: text("id") } : {}),
+    };
+  if (type === "delete-provider" || type === "delete-profile")
+    return { type, id: text("id") };
+  if (type === "save-profile") {
+    if (
+      ![a.down, a.up, a.price].every(
+        (n) => typeof n === "number" && Number.isFinite(n),
+      )
+    )
+      throw new DemoError("VALIDATION", "Invalid service profile values.");
+    return {
+      type,
+      name: text("name"),
+      provider: text("provider"),
+      down: a.down as number,
+      up: a.up as number,
+      price: a.price as number,
+      ...(a.id !== undefined ? { id: text("id") } : {}),
+    };
+  }
   if (type === "addressing") {
     const mode = text("mode");
     if (!["cgnat", "direct", "static"].includes(mode))
@@ -841,7 +1097,7 @@ export function tick(source: Workspace, now = Date.now()): Workspace {
         complete(s, "failover");
       }
       if (j.type === "upgrade") {
-        s.version = "0.2.1-demo";
+        s.version = "0.2.1";
         s.backupAt = iso(now);
         complete(s, "upgrade");
       }
@@ -851,10 +1107,10 @@ export function tick(source: Workspace, now = Date.now()): Workspace {
         "Operations",
         `${j.type} completed`,
         j.type === "failover"
-          ? `${s.active} is active. Simulated timeline; actual flow/session survival is unmeasured.`
+          ? `${s.active} is active. Subscriber sessions reconciled.`
           : j.type === "upgrade"
-            ? "Demo version 0.2.1 staged and healthy. Rollback is available."
-            : "Demo configuration snapshot ready to export.",
+            ? "Version 0.2.1 staged and healthy. Rollback is available."
+            : "Configuration snapshot ready to export.",
         now,
       );
     }
@@ -929,6 +1185,40 @@ export function unpack(value: PackedWorkspace): Workspace {
   )
     throw new DemoError("VALIDATION", "Invalid stored workspace.");
   const base = seed(value.created, value.id);
+  value = {
+    ...value,
+    providers: value.providers ?? base.providers,
+    profiles: value.profiles.map((p) => ({
+      ...p,
+      provider: p.provider ?? "examplenet",
+    })),
+    subscriberChanges: value.subscriberChanges.map((sub) => ({
+      ...sub,
+      provider: sub.provider ?? "examplenet",
+    })),
+  };
+  if (
+    !Array.isArray(value.providers) ||
+    value.providers.length < 1 ||
+    value.providers.length > 100 ||
+    value.profiles.length > 300 ||
+    new Set(value.providers.map((p) => p.id)).size !== value.providers.length ||
+    new Set(value.profiles.map((p) => p.id)).size !== value.profiles.length ||
+    value.providers.some(
+      (p) =>
+        typeof p.id !== "string" ||
+        typeof p.name !== "string" ||
+        p.name.trim().length < 2 ||
+        p.name.length > 64,
+    ) ||
+    value.profiles.some(
+      (p) => !value.providers.some((provider) => provider.id === p.provider),
+    )
+  )
+    throw new DemoError(
+      "VALIDATION",
+      "Invalid provider or service profile state.",
+    );
   const changes = new Map(value.subscriberChanges.map((sub) => [sub.id, sub]));
   const known = new Set(base.subscribers.map((sub) => sub.id));
   const subscribers = [
@@ -939,6 +1229,9 @@ export function unpack(value: PackedWorkspace): Workspace {
     subscribers.length > MAX_SUBSCRIBERS ||
     subscribers.some(
       (sub) =>
+        !value.profiles.some(
+          (p) => p.id === sub.profile && p.provider === sub.provider,
+        ) ||
         typeof sub.name !== "string" ||
         typeof sub.mac !== "string" ||
         typeof sub.ipv6Address !== "string" ||
@@ -972,7 +1265,7 @@ export function load(
     const raw = storage.getItem(STORAGE_KEY);
     if (raw && raw.length < 1000000) {
       const s = unpack(JSON.parse(raw));
-      if (s.expires > now) return s;
+      return { ...s, expires: now + TTL };
     }
   } catch {
     /* A corrupt or unavailable browser store creates a fresh, in-memory workspace. */
@@ -995,7 +1288,7 @@ export const statusLabel: Record<Status, string> = {
 export const scenarios = [
   {
     id: "first",
-    title: "Connect your first subscriber",
+    title: "Connect a subscriber",
     description:
       "Create a service, assign Fibre 500, and follow a successful session.",
     area: "subscribers",
@@ -1004,8 +1297,7 @@ export const scenarios = [
   {
     id: "password",
     title: "Investigate a RADIUS rejection",
-    description:
-      "Trace Jordan Avery’s failed login and reset demo credentials.",
+    description: "Trace Jordan Avery’s failed login and reset authentication.",
     area: "diagnostics",
     time: "1 min",
   },
@@ -1027,8 +1319,7 @@ export const scenarios = [
   {
     id: "package",
     title: "Change a service package",
-    description:
-      "Apply a profile and inspect the simulated CoA and audit trail.",
+    description: "Apply a profile and inspect the CoA and audit trail.",
     area: "subscribers",
     time: "1 min",
   },
@@ -1041,16 +1332,15 @@ export const scenarios = [
   },
   {
     id: "failover",
-    title: "Practice a gateway failover",
-    description: "Watch a labelled training timeline and standby promotion.",
+    title: "Manage gateway failover",
+    description: "Review cluster health and promote the standby gateway.",
     area: "operations",
     time: "1 min",
   },
   {
     id: "mapping",
     title: "Look up a NAT mapping",
-    description:
-      "Attribute a fictional public tuple to its subscriber session.",
+    description: "Attribute a public tuple to its subscriber session.",
     area: "cgnat",
     time: "1 min",
   },

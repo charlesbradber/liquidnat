@@ -36,7 +36,7 @@ def main():
                     with client.open(req,timeout=5) as response:return response.status,json.load(response)
                 except urllib.error.HTTPError as error:return error.code,json.load(error)
             assert request(a,'/subscribers')[0]==401
-            code,sa=request(a);assert code==200
+            code,sa=request(a);assert code==200,(code,sa)
             _,sb=request(b);assert sa['workspace']['id']!=sb['workspace']['id']
             assert sa['capabilities']['packet_engine'] is False
             headers={'X-Demo-CSRF':sa['csrf'],'If-Match':'1','Idempotency-Key':'test-fix-auth'}
@@ -65,6 +65,10 @@ def main():
                 try:a.open(base+path,timeout=5);raise AssertionError('Private file exposed')
                 except urllib.error.HTTPError as error:assert error.code==404
             print('PASS: PHP API session isolation, CSRF/origin checks, revision conflicts, exact replay, reset, pagination, validation, rate limits and private-file boundaries')
+        except BaseException:
+            log.seek(0)
+            print(log.read().decode(errors='replace'))
+            raise
         finally:
             server.terminate();server.wait(timeout=5)
 

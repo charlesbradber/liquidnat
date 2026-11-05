@@ -10,6 +10,8 @@ Product components: **LiquidNAT Gateway** (original packet-engine foundations), 
 
 Start the web demo:
 
+**Live demo: https://demo.liquidnat.com/**. Demo changes on `main` deploy to the cPanel host automatically; see [deployment instructions](docs/deployment.md). Engine-only and unrelated site changes do not deploy the demo.
+
 ```sh
 cd management/web
 npm ci

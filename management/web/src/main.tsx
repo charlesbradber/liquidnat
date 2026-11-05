@@ -54,6 +54,9 @@ import {
 } from "lucide-react";
 import {
   Action,
+  ConnectionType,
+  connectionTypeLabel,
+  radiusAccessLabel,
   apply,
   DemoError,
   Event,
@@ -78,6 +81,7 @@ import {
 import { ProviderManagement, ServiceProfileEditor } from "./ProviderManagement";
 import "./style.css";
 import "./providers.css";
+import { ConnectionTypes } from "./ConnectionTypes";
 import "./search-addressing.css";
 import "./manager-theme.css";
 import { HttpDemoBackend } from "./backend";
@@ -99,6 +103,7 @@ type Modal = {
     | "create"
     | "create-profile"
     | "profile"
+    | "connection"
     | "subscriber"
     | "addressing"
     | "tour"
@@ -245,6 +250,11 @@ export function App() {
   const [planUp, setPlanUp] = useState("1000");
   const [createName, setCreateName] = useState("");
   const [createUser, setCreateUser] = useState("");
+  const [createConnectionType, setCreateConnectionType] =
+    useState<ConnectionType>(state.providers[0].connectionType);
+  const [connectionChoice, setConnectionChoice] =
+    useState<ConnectionType>("pppoe");
+  const [connectionFilter, setConnectionFilter] = useState("all");
   const [createProvider, setCreateProvider] = useState(state.providers[0].id);
   const [profileProvider, setProfileProvider] = useState(state.providers[0].id);
   const [providerFilter, setProviderFilter] = useState("all");
@@ -349,6 +359,7 @@ export function App() {
     setQuery("");
     setFilter("all");
     setModeFilter("all");
+    setConnectionFilter("all");
     setPage(0);
     setTab(target === "network" ? "interfaces" : "");
   };
@@ -419,10 +430,12 @@ export function App() {
               ? !["online", "suspended"].includes(s.status)
               : s.status === filter)) &&
           (providerFilter === "all" || s.provider === providerFilter) &&
+          (connectionFilter === "all" ||
+            s.connectionType === connectionFilter) &&
           matchesSubscriber(s, query) &&
           (modeFilter === "all" || s.addressMode === modeFilter),
       ),
-    [state, query, filter, modeFilter, providerFilter],
+    [state, query, filter, modeFilter, providerFilter, connectionFilter],
   );
   const globalMatches = useMemo(
     () =>
@@ -679,6 +692,7 @@ export function App() {
               <th>Subscriber</th>
               <th>Status</th>
               <th>IPv4 / mode</th>
+              <th>Connection type</th>
               <th>Network provider</th>
               <th>Service profile</th>
               {!compact && <th>Circuit / VLAN</th>}
@@ -721,6 +735,7 @@ export function App() {
                   {s.ip}
                   <small>{addressModeLabel[s.addressMode]}</small>
                 </td>
+                <td>{connectionTypeLabel[s.connectionType]}</td>
                 <td>
                   {state.providers.find((p) => p.id === s.provider)?.name}
                 </td>
@@ -1128,6 +1143,10 @@ export function App() {
                   <button
                     className="button primary"
                     onClick={() => {
+                      setCreateConnectionType(
+                        state.providers.find((p) => p.id === createProvider)!
+                          .connectionType,
+                      );
                       setCreateName("");
                       setCreateUser("");
                       setFormError("");
@@ -1144,6 +1163,10 @@ export function App() {
                 <button
                   className="button primary"
                   onClick={() => {
+                    setCreateConnectionType(
+                      state.providers.find((p) => p.id === createProvider)!
+                        .connectionType,
+                    );
                     setCreateName("");
                     setCreateUser("");
                     setFormError("");
@@ -1230,6 +1253,18 @@ export function App() {
                       <option value="cgnat">CGNAT</option>
                       <option value="direct">Direct IPv4</option>
                       <option value="static">Static IPv4</option>
+                    </select>
+                    <select
+                      aria-label="Filter connection type"
+                      value={connectionFilter}
+                      onChange={(e) => {
+                        setConnectionFilter(e.target.value);
+                        setPage(0);
+                      }}
+                    >
+                      <option value="all">All connection types</option>
+                      <option value="pppoe">PPPoE</option>
+                      <option value="dhcp">DHCP</option>
                     </select>
                     <select
                       aria-label="Filter network provider"
@@ -1410,6 +1445,7 @@ export function App() {
 
           {area === "radius" && (
             <>
+              <ConnectionTypes state={state} review={preview} />
               <div className="metrics-grid three">
                 <Metric
                   label="Authentication acceptance"
@@ -1452,6 +1488,7 @@ export function App() {
                       <thead>
                         <tr>
                           <th>Subscriber</th>
+                          <th>Connection type</th>
                           <th>Decision</th>
                           <th>Reason</th>
                           <th />
@@ -1467,8 +1504,13 @@ export function App() {
                           <tr key={s.id}>
                             <td>
                               <strong>{s.name}</strong>
-                              <small>{s.username}</small>
+                              <small>
+                                {s.connectionType === "dhcp"
+                                  ? `${s.mac} · ${s.circuit}`
+                                  : s.username}
+                              </small>
                             </td>
+                            <td>{connectionTypeLabel[s.connectionType]}</td>
                             <td>
                               <Badge
                                 tone={
@@ -1484,8 +1526,12 @@ export function App() {
                             </td>
                             <td>
                               {s.status === "auth-rejected"
-                                ? "Invalid credentials"
-                                : "Valid cached policy"}
+                                ? s.connectionType === "dhcp"
+                                  ? "MAC / circuit policy rejected"
+                                  : "Invalid credentials"
+                                : s.connectionType === "dhcp"
+                                  ? "DHCP access policy matched"
+                                  : "Valid cached policy"}
                             </td>
                             <td>
                               <button
@@ -1548,6 +1594,7 @@ export function App() {
 
           {area === "network" && (
             <>
+              <ConnectionTypes state={state} review={preview} />
               <div className="tabs">
                 {["interfaces", "routes", "addressing"].map((t) => (
                   <button
@@ -2304,7 +2351,7 @@ export function App() {
                       {
                         online: "The demo session is healthy",
                         suspended: "Service is suspended",
-                        "auth-rejected": "Credentials were rejected",
+                        "auth-rejected": chosen.connectionType === "dhcp" ? "DHCP access identity was rejected" : "Credentials were rejected",
                         "vlan-mismatch": "The handoff VLAN does not match",
                         "pool-exhausted": "No admission capacity remains",
                       }[chosen.status]
@@ -2317,8 +2364,9 @@ export function App() {
                           "Authentication, addressing, and policy are ready in this simulation. This is not a live end-to-end traffic test.",
                         suspended:
                           "The suspended policy blocks both address families. Restore the service to return to its assigned package.",
-                        "auth-rejected":
-                          "RADIUS returned Access-Reject, not a timeout. Reset the synthetic credential state to demonstrate recovery. No real password is collected.",
+                        "auth-rejected": chosen.connectionType === "dhcp"
+                          ? "RADIUS returned Access-Reject for the simulated MAC / circuit identity. Review the DHCP access policy reset to demonstrate recovery."
+                          : "RADIUS returned Access-Reject, not a timeout. Reset the synthetic credential state to demonstrate recovery. No real password is collected.",
                         "vlan-mismatch": `The circuit arrived on VLAN ${chosen.vlan}, while the service expects VLAN ${chosen.expectedVlan}. Preview a configuration correction before applying it.`,
                         "pool-exhausted":
                           "Existing sessions keep their mappings. Expand the seeded pool capacity to allow this subscriber to connect.",
@@ -2334,14 +2382,14 @@ export function App() {
                           "Reset demo authentication",
                           [
                             ["Subscriber", chosen.name],
-                            ["Before", "Access-Reject · invalid credentials"],
+                            ["Before", chosen.connectionType === "dhcp" ? "Access-Reject · MAC / circuit policy rejected" : "Access-Reject · invalid credentials"],
                             ["After", "Simulated Access-Accept"],
                             ["Real credentials", "None collected or changed"],
                           ],
                         )
                       }
                     >
-                      Review credential reset <ArrowRight size={14} />
+                      {chosen.connectionType === "dhcp" ? "Review DHCP access reset" : "Review credential reset"} <ArrowRight size={14} />
                     </button>
                   )}
                   {chosen.status === "vlan-mismatch" && (
@@ -2730,6 +2778,7 @@ export function App() {
                   preview(
                     {
                       type: "create",
+                      connectionType: createConnectionType,
                       name: createName,
                       username: `${createUser}@example.net`,
                       profile: createProfile,
@@ -2741,6 +2790,14 @@ export function App() {
                         "Network provider",
                         state.providers.find((p) => p.id === createProvider)!
                           .name,
+                      ],
+                      [
+                        "Connection type",
+                        connectionTypeLabel[createConnectionType],
+                      ],
+                      [
+                        "RADIUS access",
+                        radiusAccessLabel[createConnectionType],
                       ],
                       ["Name", createName],
                       ["Username", `${createUser}@example.net`],
@@ -2790,6 +2847,10 @@ export function App() {
                       value={createProvider}
                       onChange={(e) => {
                         setCreateProvider(e.target.value);
+                        setCreateConnectionType(
+                          state.providers.find((p) => p.id === e.target.value)!
+                            .connectionType,
+                        );
                         setCreateProfile(
                           state.profiles.find(
                             (p) => p.provider === e.target.value,
@@ -2802,6 +2863,20 @@ export function App() {
                           {p.name}
                         </option>
                       ))}
+                    </select>
+                  </label>
+                  <label>
+                    Connection type
+                    <select
+                      value={createConnectionType}
+                      onChange={(e) =>
+                        setCreateConnectionType(
+                          e.target.value as ConnectionType,
+                        )
+                      }
+                    >
+                      <option value="pppoe">PPPoE</option>
+                      <option value="dhcp">DHCP</option>
                     </select>
                   </label>
                   <label>
@@ -2830,7 +2905,9 @@ export function App() {
                   <ShieldCheck size={18} />
                   <p>
                     Creates a fictional subscriber and simulated session. No
-                    password or real account is needed.
+                    password or real account is needed. DHCP access uses the
+                    simulated MAC and circuit identity; the demo username
+                    remains an inventory identifier.
                   </p>
                 </div>
                 <div className="modal-actions">
@@ -2843,6 +2920,65 @@ export function App() {
                   </button>
                   <button className="button primary" disabled={!createProfile}>
                     Review subscriber <ArrowRight size={14} />
+                  </button>
+                </div>
+              </form>
+            )}
+            {modal.kind === "connection" && modal.sub && (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  preview(
+                    {
+                      type: "connection",
+                      id: modal.sub!.id,
+                      connectionType: connectionChoice,
+                    },
+                    "Review subscriber connection type",
+                    [
+                      ["Subscriber", modal.sub!.name],
+                      [
+                        "Connection type",
+                        `${connectionTypeLabel[modal.sub!.connectionType]} → ${connectionTypeLabel[connectionChoice]}`,
+                      ],
+                      ["RADIUS access", radiusAccessLabel[connectionChoice]],
+                      [
+                        "Impact",
+                        "Simulated access policy only; IP addressing and service profile retained",
+                      ],
+                    ],
+                  );
+                }}
+              >
+                <label>
+                  Connection type
+                  <select
+                    value={connectionChoice}
+                    onChange={(e) =>
+                      setConnectionChoice(e.target.value as ConnectionType)
+                    }
+                  >
+                    <option value="pppoe">PPPoE</option>
+                    <option value="dhcp">DHCP</option>
+                  </select>
+                </label>
+                <p className="modal-description">
+                  {radiusAccessLabel[connectionChoice]}. This changes simulated
+                  access policy; no real network service is contacted.
+                </p>
+                <div className="modal-actions">
+                  <button
+                    type="button"
+                    className="button secondary"
+                    onClick={() => setModal(null)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="button primary"
+                    disabled={connectionChoice === modal.sub.connectionType}
+                  >
+                    Review connection type
                   </button>
                 </div>
               </form>
@@ -3191,6 +3327,14 @@ export function App() {
                     </dd>
                   </div>
                   <div>
+                    <dt>Connection type</dt>
+                    <dd>{connectionTypeLabel[modal.sub.connectionType]}</dd>
+                  </div>
+                  <div>
+                    <dt>RADIUS access</dt>
+                    <dd>{radiusAccessLabel[modal.sub.connectionType]}</dd>
+                  </div>
+                  <div>
                     <dt>Network provider</dt>
                     <dd>
                       {
@@ -3250,6 +3394,19 @@ export function App() {
                     onClick={() => diagnostic(modal.sub!)}
                   >
                     <Activity size={15} /> Diagnose
+                  </button>
+                  <button
+                    className="button secondary"
+                    onClick={() => {
+                      setConnectionChoice(modal.sub!.connectionType);
+                      setModal({
+                        kind: "connection",
+                        title: "Change connection type",
+                        sub: modal.sub,
+                      });
+                    }}
+                  >
+                    Change connection type
                   </button>
                   <button
                     className="button secondary"

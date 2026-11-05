@@ -99,3 +99,11 @@ Open **Network providers** to add or rename providers and see their subscriber/p
 When adding a subscriber, choose its provider first; only that provider's service profiles are offered. Providers without profiles cannot accept a new subscriber until you add a profile. In a subscriber's **Change profile** dialog, select another provider and one of its profiles to transfer the service. The subscriber list can be filtered by provider and shows provider membership; details and exports retain it.
 
 Profiles with assigned subscribers cannot be deleted or moved to another provider. Move those subscribers first. Empty providers can be deleted after removing their profiles; one provider must remain. Existing saved sessions migrate under ExampleNet and retain their subscriber changes. These are simulated configuration groups within a demo workspace.
+
+### PPPoE and DHCP connection types
+
+Network providers have a `connectionType` default (`pppoe` or `dhcp`). Set it in Network providers, Network, or RADIUS; changes go through review and apply, and existing subscribers retain their configured type. New subscribers inherit the selected provider's default and can override it. Subscriber details show the configured access type; **Change connection type** edits it independently of the service profile and IPv4 mode. Subscriber filters and exports retain the type.
+
+RADIUS views distinguish PPPoE username/PPP sessions from DHCP IPoE leases identified by MAC and circuit. Diagnostics reflect this identity. All access and accounting behaviour is simulated; the GUI does not run PPPoE, DHCP or RADIUS services.
+
+API actions `save-provider` and `create` accept optional `connectionType`. Omission preserves an existing provider's default (or uses PPPoE for a new provider), and subscriber creation inherits its provider's default. `{type:"connection",id,connectionType}` changes a subscriber's type. GET `/subscribers` accepts `connectionType=pppoe|dhcp|all`. Unsupported types reject. Older saved records migrate to PPPoE while retaining their existing data; provider transfers retain each subscriber's explicit connection type.

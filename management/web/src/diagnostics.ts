@@ -1,4 +1,5 @@
 import type { Subscriber, Workspace } from "./simulator";
+import { connectionTypeLabel } from "./simulator";
 export type DiagnosticStep = {
   title: string;
   detail: string;
@@ -14,7 +15,7 @@ export function diagnose(
   const stages = [
     {
       title: "Circuit & access handoff",
-      detail: `${sub.circuit} · received VLAN ${sub.vlan} · expected ${sub.expectedVlan}`,
+      detail: `${connectionTypeLabel[sub.connectionType]} · ${sub.circuit} · received VLAN ${sub.vlan} · expected ${sub.expectedVlan}`,
       failed: sub.vlan !== sub.expectedVlan,
       code: "ACCESS_VLAN_MISMATCH",
     },
@@ -22,8 +23,10 @@ export function diagnose(
       title: "RADIUS authentication",
       detail:
         sub.status === "auth-rejected"
-          ? "Access-Reject · synthetic invalid credentials"
-          : "Simulated Access-Accept · realm example.net",
+          ? (sub.connectionType === "dhcp" ? "Access-Reject · synthetic MAC / circuit identity rejected" : "Access-Reject · synthetic invalid credentials")
+          : sub.connectionType === "dhcp"
+            ? `Simulated DHCP/IPoE Access-Accept · MAC ${sub.mac} · circuit ${sub.circuit}`
+            : "Simulated PPPoE Access-Accept · realm example.net",
       failed: sub.status === "auth-rejected",
       code: "AUTH_REJECTED",
     },

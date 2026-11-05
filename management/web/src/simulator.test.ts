@@ -670,3 +670,148 @@ describe("Network providers", () => {
     expect(() => unpack(old)).toThrow(/Invalid subscriber/);
   });
 });
+
+describe("PPPoE and DHCP access types", () => {
+  it("inherits network defaults, supports subscriber overrides, and retains explicit types across network and profile changes", () => {
+    let s = seed(now);
+    const original = s;
+    s = apply(
+      s,
+      parseAction({
+        type: "save-provider",
+        id: "examplenet",
+        name: "ExampleNet",
+        connectionType: "dhcp",
+      }),
+      s.revision,
+      now,
+    );
+    expect(s.providers[0].connectionType).toBe("dhcp");
+    expect(original.providers[0].connectionType).toBe("pppoe");
+    expect(s.subscribers[0].connectionType).toBe("pppoe");
+    s = apply(
+      s,
+      parseAction({
+        type: "create",
+        name: "DHCP Service",
+        username: "dhcp.service@example.net",
+        profile: "home500",
+      }),
+      s.revision,
+      now,
+    );
+    expect(s.subscribers[0].connectionType).toBe("dhcp");
+    const dhcpId = s.subscribers[0].id;
+    s = apply(
+      s,
+      parseAction({
+        type: "create",
+        name: "PPP Service",
+        username: "ppp.service@example.net",
+        profile: "home500",
+        connectionType: "pppoe",
+      }),
+      s.revision,
+      now,
+    );
+    expect(s.subscribers[0].connectionType).toBe("pppoe");
+    const before = s;
+    const sub = s.subscribers.find((sub) => sub.id === dhcpId)!;
+    s = apply(
+      s,
+      parseAction({ type: "connection", id: dhcpId, connectionType: "pppoe" }),
+      s.revision,
+      now,
+    );
+    expect(
+      before.subscribers.find((sub) => sub.id === dhcpId)!.connectionType,
+    ).toBe("dhcp");
+    expect(s.subscribers.find((sub) => sub.id === dhcpId)).toMatchObject({
+      connectionType: "pppoe",
+      profile: sub.profile,
+      ip: sub.ip,
+      ipv6: sub.ipv6,
+      status: sub.status,
+    });
+    expect(s.events[0].detail).toContain("DHCP → PPPoE");
+    s = apply(
+      s,
+      { type: "profile", id: dhcpId, profile: "home100" },
+      s.revision,
+      now,
+    );
+    expect(s.subscribers.find((sub) => sub.id === dhcpId)!.connectionType).toBe(
+      "pppoe",
+    );
+    expect(unpack(JSON.parse(JSON.stringify(pack(s))))).toEqual(s);
+    expect(
+      querySubscribers(s, "", 0, 10, "all", "all", "all", "dhcp").total,
+    ).toBe(0);
+  });
+  it("rejects unsupported access types, unknown subscribers and stale revisions", () => {
+    const s = seed(now);
+    for (const connectionType of ["static", "PPPoE", "", null, 1]) {
+      expect(() =>
+        parseAction({ type: "connection", id: "sub-0001", connectionType }),
+      ).toThrow(/PPPoE or DHCP/);
+      expect(() =>
+        parseAction({ type: "save-provider", name: "Invalid", connectionType }),
+      ).toThrow(/PPPoE or DHCP/);
+      expect(() =>
+        parseAction({
+          type: "create",
+          name: "Invalid",
+          username: "invalid@example.net",
+          profile: "home100",
+          connectionType,
+        }),
+      ).toThrow(/PPPoE or DHCP/);
+    }
+    expect(() =>
+      apply(
+        s,
+        { type: "connection", id: "missing", connectionType: "dhcp" },
+        s.revision,
+        now,
+      ),
+    ).toThrow(/not found/);
+    expect(() =>
+      apply(
+        s,
+        { type: "connection", id: "sub-0001", connectionType: "dhcp" },
+        0,
+        now,
+      ),
+    ).toThrow(/configuration changed/);
+    expect(() =>
+      apply(
+        s,
+        { type: "connection", id: "sub-0001", connectionType: "pppoe" },
+        s.revision,
+        now,
+      ),
+    ).toThrow(/already uses/);
+  });
+  it("migrates saved providers and subscriber changes without connection fields and rejects corrupt types", () => {
+    let s = seed(now);
+    s = apply(s, { type: "suspend", id: "sub-0001" }, s.revision, now);
+    const old = JSON.parse(JSON.stringify(pack(s)));
+    old.providers.forEach(
+      (p: Record<string, unknown>) => delete p.connectionType,
+    );
+    old.subscriberChanges.forEach(
+      (sub: Record<string, unknown>) => delete sub.connectionType,
+    );
+    const restored = unpack(old);
+    expect(restored.providers[0].connectionType).toBe("pppoe");
+    expect(restored.subscribers[0]).toMatchObject({
+      connectionType: "pppoe",
+      status: "suspended",
+    });
+    old.subscriberChanges[0].connectionType = "unsupported";
+    expect(() => unpack(old)).toThrow(/Invalid subscriber/);
+    old.subscriberChanges[0].connectionType = "dhcp";
+    old.providers[0].connectionType = "unsupported";
+    expect(() => unpack(old)).toThrow(/Invalid provider/);
+  });
+});

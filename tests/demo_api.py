@@ -90,6 +90,15 @@ def main():
             code,bad=request(a,'/actions',{'type':'create-profile','name':'fibre 2500','down':2500,'up':1000},{**headers,'If-Match':'7','Idempotency-Key':'test-duplicate-profile'});assert code==422 and bad['error']['code']=='DUPLICATE'
             _,persisted=request(a);assert any(p['id']==policy['id'] for p in persisted['workspace']['profiles'])
             _,other=request(b);assert len(other['workspace']['profiles'])==3
+            # Network defaults and per-subscriber PPPoE/DHCP configuration share the RADIUS model.
+            code,network_type=change({'type':'save-provider','id':'examplenet','name':'ExampleNet','connectionType':'dhcp'},7,'network-dhcp-default');assert code==200,network_type
+            code,access=change({'type':'connection','id':'sub-0001','connectionType':'dhcp'},8,'subscriber-dhcp');assert code==200,access
+            assert next(s for s in access['workspace']['subscriberChanges'] if s['id']=='sub-0001')['connectionType']=='dhcp'
+            code,new_access=change({'type':'create','name':'DHCP Customer','username':'dhcp.customer@example.net','profile':'home100'},9,'create-dhcp-customer');assert code==200,new_access
+            assert any(s['name']=='DHCP Customer' and s['connectionType']=='dhcp' for s in new_access['workspace']['subscriberChanges'])
+            code,dhcp_page=request(a,'/subscribers?connectionType=dhcp');assert code==200 and dhcp_page['total']==2,dhcp_page
+            code,bad=change({'type':'connection','id':'sub-0001','connectionType':'unknown'},10,'reject-invalid-access');assert code==422 and bad['error']['code']=='VALIDATION',bad
+            _,isolated=request(b);assert isolated['workspace']['providers'][0]['connectionType']=='pppoe'
             # Invalid requests count toward the per-session budget too.
             statuses=[request(a,'/actions',{'type':'backup'})[0] for _ in range(65)]
             assert 429 in statuses,'Rejected mutations bypassed the request rate budget'

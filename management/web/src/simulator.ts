@@ -4,7 +4,28 @@ export type Status =
   | "auth-rejected"
   | "vlan-mismatch"
   | "pool-exhausted";
-export type Provider = { id: string; name: string };
+export type ConnectionType = "pppoe" | "dhcp";
+export const connectionTypeLabel: Record<ConnectionType, string> = {
+  pppoe: "PPPoE",
+  dhcp: "DHCP",
+};
+export const radiusAccessLabel: Record<ConnectionType, string> = {
+  pppoe: "PPP session · RADIUS username",
+  dhcp: "IPoE / DHCP lease · MAC and circuit identity",
+};
+export function validateConnectionType(value: unknown): ConnectionType {
+  if (value !== "pppoe" && value !== "dhcp")
+    throw new DemoError(
+      "VALIDATION",
+      "Choose PPPoE or DHCP as the connection type.",
+    );
+  return value;
+}
+export type Provider = {
+  id: string;
+  name: string;
+  connectionType: ConnectionType;
+};
 export type Profile = {
   provider: string;
   id: string;
@@ -15,6 +36,7 @@ export type Profile = {
   nat: string;
 };
 export type Subscriber = {
+  connectionType: ConnectionType;
   provider: string;
   id: string;
   name: string;
@@ -96,12 +118,19 @@ export type Action =
     }
   | {
       type: "create";
+      connectionType?: ConnectionType;
       name: string;
       username: string;
       profile: string;
       provider?: string;
     }
-  | { type: "save-provider"; id?: string; name: string }
+  | {
+      type: "save-provider";
+      id?: string;
+      name: string;
+      connectionType?: ConnectionType;
+    }
+  | { type: "connection"; id: string; connectionType: ConnectionType }
   | { type: "delete-provider"; id: string }
   | {
       type: "save-profile";
@@ -194,6 +223,7 @@ export function matchesSubscriber(sub: Subscriber, query: string) {
   const q = query.trim().toLowerCase();
   if (!q) return true;
   const fields = [
+    connectionTypeLabel[sub.connectionType],
     sub.name,
     sub.username,
     sub.circuit,
@@ -226,10 +256,12 @@ export function querySubscribers(
   status = "all",
   mode = "all",
   provider = "all",
+  connectionType = "all",
 ) {
   const matches = s.subscribers.filter(
     (sub) =>
       (provider === "all" || sub.provider === provider) &&
+      (connectionType === "all" || sub.connectionType === connectionType) &&
       matchesSubscriber(sub, query) &&
       (status === "all" ||
         (status === "issues"
@@ -306,6 +338,7 @@ export function seed(now = Date.now(), id: string = uid()): Workspace {
     { length: DEMO_SUBSCRIBERS },
     (_, i) => ({
       provider: "examplenet",
+      connectionType: "pppoe",
       id: `sub-${String(i + 1).padStart(4, "0")}`,
       name: `${first[i % 12]} ${last[Math.floor(i / 12) % 11]}`,
       username: `subscriber${String(i + 1).padStart(3, "0")}@example.net`,
@@ -353,7 +386,9 @@ export function seed(now = Date.now(), id: string = uid()): Workspace {
     version: "0.2.0-demo",
     subscribers,
     profiles,
-    providers: [{ id: "examplenet", name: "ExampleNet" }],
+    providers: [
+      { id: "examplenet", name: "ExampleNet", connectionType: "pppoe" },
+    ],
     events: [
       {
         id: "evt-3",
@@ -522,6 +557,11 @@ export function apply(
   };
   if (action.type === "save-provider") {
     const name = validName(action.name);
+    const connectionType = validateConnectionType(
+      action.connectionType ??
+        s.providers.find((p) => p.id === action.id)?.connectionType ??
+        "pppoe",
+    );
     if (action.id && !s.providers.some((p) => p.id === action.id))
       throw new DemoError("NOT_FOUND", "Network provider not found.");
     if (
@@ -537,13 +577,32 @@ export function apply(
         "This demo supports up to 100 network providers.",
       );
     s.providers = action.id
-      ? s.providers.map((p) => (p.id === action.id ? { ...p, name } : p))
-      : [...s.providers, { id: uid(), name }];
+      ? s.providers.map((p) =>
+          p.id === action.id ? { ...p, name, connectionType } : p,
+        )
+      : [...s.providers, { id: uid(), name, connectionType }];
     event(
       s,
       "Providers",
       action.id ? "Network provider updated" : "Network provider added",
-      name,
+      `${name} · default connection type ${connectionTypeLabel[connectionType]}. Existing subscriber connection types retained.`,
+      now,
+    );
+  } else if (action.type === "connection") {
+    const connectionType = validateConnectionType(action.connectionType);
+    const sub = find(action.id);
+    if (sub.connectionType === connectionType)
+      throw new DemoError(
+        "INVALID_STATE",
+        "This subscriber already uses that connection type.",
+      );
+    const previous = sub.connectionType;
+    sub.connectionType = connectionType;
+    event(
+      s,
+      "RADIUS",
+      "Subscriber connection type changed",
+      `${sub.name}: ${connectionTypeLabel[previous]} → ${connectionTypeLabel[connectionType]}. Simulated access policy updated; addressing and service profile retained.`,
       now,
     );
   } else if (action.type === "delete-provider") {
@@ -700,6 +759,10 @@ export function apply(
     )
       throw new DemoError("DUPLICATE", "That username is already in use.");
     const provider = selectedProvider(action.profile, action.provider);
+    const connectionType = validateConnectionType(
+      action.connectionType ??
+        s.providers.find((p) => p.id === provider)!.connectionType,
+    );
     const i = s.subscribers.length + 1;
     s.subscribers.unshift({
       id: `sub-${String(i).padStart(4, "0")}`,
@@ -711,6 +774,7 @@ export function apply(
       ipv6Address: `2001:db8:ffff:${i.toString(16)}::2`,
       mac: subscriberMac(i - 1),
       addressMode: "direct",
+      connectionType,
       provider,
       profile: action.profile,
       status: "online",
@@ -872,7 +936,7 @@ export function apply(
         s,
         "RADIUS",
         "Authentication recovered",
-        `${sub.name} · simulated credential reset and Access-Accept. No actual password stored.`,
+        sub.connectionType === "dhcp" ? `${sub.name} · simulated MAC / circuit policy reset and Access-Accept.` : `${sub.name} · simulated credential reset and Access-Accept. No actual password stored.`,
         now,
       );
     } else {
@@ -1019,8 +1083,17 @@ export function parseAction(value: unknown): Action {
       ...(a.provider !== undefined ? { provider: text("provider") } : {}),
     };
   }
+  if (type === "connection")
+    return {
+      type,
+      id: text("id"),
+      connectionType: validateConnectionType(a.connectionType),
+    };
   if (type === "create")
     return {
+      ...(a.connectionType !== undefined
+        ? { connectionType: validateConnectionType(a.connectionType) }
+        : {}),
       type,
       name: text("name"),
       username: text("username", 64),
@@ -1036,6 +1109,9 @@ export function parseAction(value: unknown): Action {
     };
   if (type === "save-provider")
     return {
+      ...(a.connectionType !== undefined
+        ? { connectionType: validateConnectionType(a.connectionType) }
+        : {}),
       type,
       name: text("name"),
       ...(a.id !== undefined ? { id: text("id") } : {}),
@@ -1201,7 +1277,10 @@ export function unpack(value: PackedWorkspace): Workspace {
   const base = seed(value.created, value.id);
   value = {
     ...value,
-    providers: value.providers ?? base.providers,
+    providers: (value.providers ?? base.providers).map((p) => ({
+      ...p,
+      connectionType: p.connectionType ?? "pppoe",
+    })),
     profiles: value.profiles.map((p) => ({
       ...p,
       provider: p.provider ?? "examplenet",
@@ -1209,6 +1288,7 @@ export function unpack(value: PackedWorkspace): Workspace {
     subscriberChanges: value.subscriberChanges.map((sub) => ({
       ...sub,
       provider: sub.provider ?? "examplenet",
+      connectionType: sub.connectionType ?? "pppoe",
     })),
   };
   if (
@@ -1220,6 +1300,7 @@ export function unpack(value: PackedWorkspace): Workspace {
     new Set(value.profiles.map((p) => p.id)).size !== value.profiles.length ||
     value.providers.some(
       (p) =>
+        !["pppoe", "dhcp"].includes(p.connectionType) ||
         typeof p.id !== "string" ||
         typeof p.name !== "string" ||
         p.name.trim().length < 2 ||
@@ -1246,6 +1327,7 @@ export function unpack(value: PackedWorkspace): Workspace {
         !value.profiles.some(
           (p) => p.id === sub.profile && p.provider === sub.provider,
         ) ||
+        !["pppoe", "dhcp"].includes(sub.connectionType) ||
         typeof sub.name !== "string" ||
         typeof sub.mac !== "string" ||
         typeof sub.ipv6Address !== "string" ||

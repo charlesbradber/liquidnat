@@ -75,12 +75,10 @@ describe("Manager interactions", () => {
   it("uses the same redesigned overview when the PHP adapter supplies the workspace", async () => {
     const workspace = seed();
     window.history.replaceState({}, "", "/?backend=php");
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue({
-        ok: true,
-        json: async () => ({ csrf: "test-csrf", workspace: pack(workspace) }),
-      });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ csrf: "test-csrf", workspace: pack(workspace) }),
+    });
     vi.stubGlobal("fetch", fetchMock);
     render(<App />);
     await screen.findByRole("region", { name: "Gateways (2)" });
@@ -343,4 +341,55 @@ it("adds a provider, builds its catalogue, and creates and transfers subscribers
   render(<App />);
   nav("Network providers");
   expect(screen.getByRole("button", { name: "Edit City Fibre" })).toBeTruthy();
+}, 60000);
+
+it("configures a network RADIUS default and creates, filters and edits a DHCP subscriber", () => {
+  render(<App />);
+  fireEvent.click(screen.getByRole("button", { name: "RADIUS" }));
+  fireEvent.change(screen.getByLabelText("Connection type for ExampleNet"), {
+    target: { value: "dhcp" },
+  });
+  expect(screen.getByText("PPPoE → DHCP")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Apply demo change" }));
+  fireEvent.click(screen.getByRole("button", { name: "Network" }));
+  expect(
+    (
+      screen.getByLabelText(
+        "Connection type for ExampleNet",
+      ) as HTMLSelectElement
+    ).value,
+  ).toBe("dhcp");
+  fireEvent.click(screen.getByRole("button", { name: /^Subscribers/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Add subscriber" }));
+  expect(
+    (screen.getByLabelText("Connection type") as HTMLSelectElement).value,
+  ).toBe("dhcp");
+  fireEvent.change(screen.getByLabelText("Subscriber name"), {
+    target: { value: "DHCP Customer" },
+  });
+  fireEvent.change(screen.getByLabelText("Demo username"), {
+    target: { value: "dhcp.customer" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /Review subscriber/ }));
+  expect(
+    screen.getByText("IPoE / DHCP lease · MAC and circuit identity"),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Apply demo change" }));
+  fireEvent.change(screen.getByLabelText("Filter connection type"), {
+    target: { value: "dhcp" },
+  });
+  expect(screen.getByText(/of 1 subscribers/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "View DHCP Customer" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Change connection type" }),
+  );
+  fireEvent.change(screen.getByLabelText("Connection type"), {
+    target: { value: "pppoe" },
+  });
+  fireEvent.click(
+    screen.getByRole("button", { name: "Review connection type" }),
+  );
+  expect(screen.getByText("DHCP → PPPoE")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Apply demo change" }));
+  expect(screen.getByText("No subscribers found")).toBeTruthy();
 }, 60000);

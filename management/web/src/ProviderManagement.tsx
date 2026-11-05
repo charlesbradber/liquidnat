@@ -176,7 +176,7 @@ export function ServiceProfileEditor({
       >
         <div className="form-grid">
           <label>
-            Profile name
+            Service profile name
             <input
               required
               minLength={2}

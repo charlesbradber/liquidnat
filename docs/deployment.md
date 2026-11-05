@@ -4,7 +4,9 @@ The owner-selected live demo is **https://demo.liquidnat.com/**. SSH administrat
 
 ## Automatic deployment
 
-`.github/workflows/deploy-demo.yml` runs only on pushes to `main` that change `management/web/**`, `deploy/demo/**`, or that deployment workflow. Engine, unrelated landing page and ordinary documentation changes do not trigger it. Pull requests never deploy. The separate demo test workflow is also filtered to demo/API/deployment inputs.
+`.github/workflows/deploy-demo.yml` runs only on pushes to `main` or the dedicated `demo` branch that change `management/web/**`, `deploy/demo/**`, or that deployment workflow. Engine, unrelated landing page and ordinary documentation changes do not trigger it. Pull requests never deploy. The separate demo test workflow is also filtered to demo/API/deployment inputs.
+
+The `demo` branch is the live preview track: after local checks pass, fast-forward it to a reviewed feature commit and push. This publishes the same tested source without merging into `main`. Keep merges into `main` at roughly hourly checkpoints during active development, or sooner for a substantial release-ready batch, as requested by the owner. Do not force-push either branch. If `demo` has diverged, inspect and integrate that work on the feature branch before advancing it. Engine-only or documentation-only pushes on either branch still do not deploy. A later qualifying `main` push also publishes, so integrate the current preview before releasing a different main change.
 
 The build job has no deployment credentials. It installs the locked frontend dependencies using Node 22, runs model/DOM interaction tests, builds the static app, checks the archive boundary, and creates a deterministic release archive tagged with the source SHA. Only index.html, explicitly allowed browser assets, and an internal hash manifest enter the archive. PHP, `.env`, dotfiles, source files and the Cloudflare-only `_headers` file are excluded or rejected.
 
@@ -38,3 +40,11 @@ Choose an actual retained SHA from the release manifests; never interpolate an u
 For CI-key rotation, generate a new dedicated Ed25519 key on the admin host, append a restricted forced-command public-key entry for liquidnat, replace only `DEMO_DEPLOY_SSH_KEY` through stdin, verify a deployment, then remove the superseded dedicated public key. Keep production/root administrative keys separate. No key material belongs in documentation.
 
 Only the browser simulator is public. The PHP/SQLite/Node simulator API is not deployed, and no real gateway, RADIUS endpoint, SSH console or packet engine is exposed by the demo.
+
+## Verified installation — 2026-11-05
+
+Initial cPanel deployment was checked directly over HTTPS, including every HTML/JS/CSS hash, HTTP-to-HTTPS redirect and cache/security headers. An arbitrary `id` command through the dedicated CI key was rejected by the receiver. The original cPanel directives and AutoSSL directory remained present.
+
+The first automatic deployment completed successfully from source **5a6841fd97c5d48d0327a81f99225db824b59522**: [build, restricted SSH publish, and live HTTPS verification](https://github.com/charlesbradber/liquidnat/actions/runs/42030904129). The demo/API and Gateway workflows also passed for that commit. `/deployment.json` reported that exact SHA. The temporary private-key copy on the SSH server was removed after this successful CI run; the encrypted repository secret remains available for future deployments.
+
+A separate integration worktree at `/home/charlesbradbeer/projects/liquidnat-demo-integration` was used to merge concurrent marketing-site work. The original checkout's unrelated untracked landing-page files were preserved.

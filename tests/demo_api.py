@@ -82,6 +82,14 @@ def main():
             code,stored=request(a);assert code==200 and stored['workspace']['providers'][-1]['id']==provider_id
             _,isolated=request(b);assert len(isolated['workspace']['providers'])==1 and len(isolated['workspace']['profiles'])==3
             code,in_use=change({'type':'delete-provider','id':provider_id},5,'provider-in-use');assert code==422 and in_use['error']['code']=='IN_USE',in_use
+            code,plan=request(a,'/actions',{'type':'create-profile','name':'Fibre 2500','down':2500,'up':1000},{**headers,'If-Match':'5','Idempotency-Key':'test-create-profile'});assert code==200,plan
+            policy=next(p for p in plan['workspace']['profiles'] if p['name']=='Fibre 2500')
+            code,assigned=request(a,'/actions',{'type':'profile','id':'sub-0001','profile':policy['id']},{**headers,'If-Match':'6','Idempotency-Key':'test-assign-profile'});assert code==200,assigned
+            subscriber=next(s for s in assigned['workspace']['subscriberChanges'] if s['id']=='sub-0001')
+            assert subscriber['profile']==policy['id'] and subscriber['ip']=='192.0.2.50'
+            code,bad=request(a,'/actions',{'type':'create-profile','name':'fibre 2500','down':2500,'up':1000},{**headers,'If-Match':'7','Idempotency-Key':'test-duplicate-profile'});assert code==422 and bad['error']['code']=='DUPLICATE'
+            _,persisted=request(a);assert any(p['id']==policy['id'] for p in persisted['workspace']['profiles'])
+            _,other=request(b);assert len(other['workspace']['profiles'])==3
             # Invalid requests count toward the per-session budget too.
             statuses=[request(a,'/actions',{'type':'backup'})[0] for _ in range(65)]
             assert 429 in statuses,'Rejected mutations bypassed the request rate budget'

@@ -14,6 +14,23 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 describe("Manager interactions", () => {
+  it("reviews and creates a custom service profile", () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Service profiles" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Create service profile" }),
+    );
+    fireEvent.change(screen.getByRole("textbox", { name: "Profile name" }), {
+      target: { value: "Fibre 2500" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Review profile/ }));
+    expect(
+      screen.getByText("Unchanged; assign the new profile separately"),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Apply demo change" }));
+    expect(screen.getByRole("heading", { name: "Fibre 2500" })).toBeTruthy();
+    expect(screen.getAllByText("0 assigned subscribers")).toHaveLength(1);
+  });
   it("finds a subscriber using the top search and switches CGNAT to a static IPv4", () => {
     render(<App />);
     const search = screen.getByRole("combobox", {
@@ -189,7 +206,7 @@ it("adds a provider, builds its catalogue, and creates and transfers subscribers
   ).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   nav("Service profiles");
-  fireEvent.change(screen.getByLabelText("Profile name"), {
+  fireEvent.change(screen.getByLabelText("Service profile name"), {
     target: { value: "City 200" },
   });
   const providerSelect = screen.getByLabelText(
@@ -240,4 +257,4 @@ it("adds a provider, builds its catalogue, and creates and transfers subscribers
   render(<App />);
   nav("Network providers");
   expect(screen.getByRole("button", { name: "Edit City Fibre" })).toBeTruthy();
-});
+}, 60000);

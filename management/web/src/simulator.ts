@@ -88,6 +88,13 @@ export type Workspace = {
 };
 export type Action =
   | {
+      type: "create-profile";
+      name: string;
+      down: number;
+      up: number;
+      provider?: string;
+    }
+  | {
       type: "create";
       name: string;
       username: string;
@@ -623,6 +630,53 @@ export function apply(
       );
     s.profiles = s.profiles.filter((item) => item.id !== p.id);
     event(s, "Profiles", "Service profile deleted", p.name, now);
+  } else if (action.type === "create-profile") {
+    const provider = requireProvider(action.provider ?? s.providers[0].id);
+    const name = action.name.trim();
+    if (!/^[a-zA-Z0-9 .+'-]{2,48}$/.test(name))
+      throw new DemoError(
+        "VALIDATION",
+        "Use a profile name with 2–48 letters, numbers or spaces.",
+      );
+    if (
+      ![action.down, action.up].every(
+        (v) => Number.isInteger(v) && v >= 1 && v <= 100000,
+      )
+    )
+      throw new DemoError(
+        "VALIDATION",
+        "Speeds must be whole numbers between 1 and 100,000 Mb/s.",
+      );
+    if (s.profiles.length >= 300)
+      throw new DemoError(
+        "CAPACITY",
+        "This workspace supports up to 300 service profiles.",
+      );
+    if (
+      s.profiles.some(
+        (p) =>
+          p.provider === provider &&
+          p.name.toLowerCase() === name.toLowerCase(),
+      )
+    )
+      throw new DemoError("DUPLICATE", "That profile name is already in use.");
+    const created = {
+      provider,
+      id: `profile-${uid()}`,
+      name,
+      down: action.down,
+      up: action.up,
+      price: 0,
+      nat: "Per-subscriber IPv4 + IPv6",
+    };
+    s.profiles = [...s.profiles, created];
+    event(
+      s,
+      "Profiles",
+      "Service profile created",
+      `${name} · ${action.down}/${action.up} Mb/s · simulated policy. Existing subscribers unchanged.`,
+      now,
+    );
   } else if (action.type === "create") {
     if (s.subscribers.length >= MAX_SUBSCRIBERS)
       throw new DemoError(
@@ -954,6 +1008,17 @@ export function parseAction(value: unknown): Action {
     return a[key] as string;
   };
   const type = text("type", 32);
+  if (type === "create-profile") {
+    if (typeof a.down !== "number" || typeof a.up !== "number")
+      throw new DemoError("VALIDATION", "Speeds must be numbers.");
+    return {
+      type,
+      name: text("name", 48),
+      down: a.down,
+      up: a.up,
+      ...(a.provider !== undefined ? { provider: text("provider") } : {}),
+    };
+  }
   if (type === "create")
     return {
       type,

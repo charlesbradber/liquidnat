@@ -23,6 +23,90 @@ import {
 } from "./simulator";
 const now = 1793880000000;
 describe("Isolated demo backend", () => {
+  it("creates immutable speed policies, persists them, and assigns without changing addressing", () => {
+    const original = seed(now);
+    const action = parseAction({
+      type: "create-profile",
+      name: "Fibre 2500",
+      down: 2500,
+      up: 1000,
+    });
+    const created = apply(original, action, original.revision, now);
+    expect(original.profiles).toHaveLength(3);
+    expect(created.profiles).toHaveLength(4);
+    expect(created.subscribers).toEqual(original.subscribers);
+    const restored = unpack(JSON.parse(JSON.stringify(pack(created))));
+    const policy = restored.profiles.find((p) => p.name === "Fibre 2500")!;
+    const assigned = apply(
+      restored,
+      { type: "profile", id: "sub-0001", profile: policy.id },
+      restored.revision,
+      now + 1,
+    );
+    const sub = assigned.subscribers.find((s) => s.id === "sub-0001")!;
+    expect(sub.profile).toBe(policy.id);
+    expect(sub.ip).toBe(original.subscribers.find((s) => s.id === sub.id)!.ip);
+    expect(sub.addressMode).toBe("cgnat");
+    expect(created.events[0].title).toBe("Service profile created");
+    expect(() => apply(created, action, created.revision, now)).toThrow(
+      "already in use",
+    );
+    expect(() =>
+      apply(
+        created,
+        { ...action, name: "Other", down: 100001 } as typeof action,
+        created.revision,
+        now,
+      ),
+    ).toThrow("whole numbers");
+    expect(() => apply(original, action, 0, now)).toThrow(
+      "configuration changed",
+    );
+  });
+  it("rejects invalid profile inputs and enforces a bounded policy catalogue", () => {
+    const s = seed(now);
+    for (const down of [0, -1, 1.5, NaN, Infinity])
+      expect(() =>
+        apply(
+          s,
+          { type: "create-profile", name: "Test", down, up: 1 },
+          s.revision,
+          now,
+        ),
+      ).toThrow("whole numbers");
+    expect(() =>
+      parseAction({
+        type: "create-profile",
+        name: "Test",
+        down: "2500",
+        up: 1000,
+      }),
+    ).toThrow("must be numbers");
+    expect(() =>
+      apply(
+        s,
+        { type: "create-profile", name: "<script>", down: 1, up: 1 },
+        s.revision,
+        now,
+      ),
+    ).toThrow("profile name");
+    const full = {
+      ...s,
+      profiles: Array.from({ length: 300 }, (_, i) => ({
+        ...s.profiles[0],
+        id: `p${i}`,
+        name: `Plan ${i}`,
+      })),
+    };
+    expect(() =>
+      apply(
+        full,
+        { type: "create-profile", name: "Another", down: 1, up: 1 },
+        full.revision,
+        now,
+      ),
+    ).toThrow("300 service profiles");
+  });
   it("retains a reserved static address after authentication recovery and can bypass a blocked NAT admission", () => {
     let s = seed(now);
     s = apply(
